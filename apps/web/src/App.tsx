@@ -18,6 +18,7 @@ import {
   Send,
   ShieldCheck,
   UserPlus,
+  Upload,
   Trash2,
   Users,
   X,
@@ -27,6 +28,7 @@ import type { Html5Qrcode as Html5QrcodeInstance } from 'html5-qrcode'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import './App.css'
 import { useSelectedEventId } from './eventSelection'
+import { markDuplicates, normalizeIndonesianPhone as normalizeImportedPhone, parseContactFile, selectUpToCapacity, setRowSelectedWithinCapacity, validateContact, type ContactImportRow } from './contactImport'
 import './invitation-builder.css'
 import { InvitationBuilderPage, InvitationRenderer, type AlbumMeta, type InvitationConfig } from './InvitationBuilder'
 import { AdminHelpPage, ReceiverHelpPage } from './UserGuide'
@@ -151,6 +153,12 @@ type AdminEventLite = {
 }
 
 type AdminDashboard = {
+  quota: {
+    plan_code: string
+    guest_limit: number
+    guest_records_used: number
+    guest_records_remaining: number
+  }
   metrics: {
     total_guests: number
     confirmed_guests: number
@@ -893,6 +901,10 @@ function AdminCmsApp() {
   const [guestSearch, setGuestSearch] = useState('')
   const [guestForm, setGuestForm] = useState(emptyGuestForm)
   const [showGuestModal, setShowGuestModal] = useState(false)
+  const [showImportModal, setShowImportModal] = useState(false)
+  const [importRows, setImportRows] = useState<ContactImportRow[]>([])
+  const [importFilename, setImportFilename] = useState('')
+  const [importBusy, setImportBusy] = useState(false)
   const [showEventModal, setShowEventModal] = useState(false)
   const [editingGuest, setEditingGuest] = useState<AdminGuest | null>(null)
   const [eventForm, setEventForm] = useState({
@@ -904,6 +916,9 @@ function AdminCmsApp() {
   const [message, setMessage] = useState('Login admin untuk membuka CMS Guestory.')
 
   const selectedEvent = events.find((event) => event.id === selectedEventId)
+  const guestQuota = dashboard?.quota
+  const importCapacity = guestQuota?.guest_records_remaining ?? 0
+  const selectedImportCount = importRows.filter((row) => row.selected).length
 
   const adminFetch = useCallback(async function adminFetch<T>(path: string, options: RequestInit = {}) {
     const response = await fetch(`${API_BASE}${path}`, {
@@ -979,6 +994,57 @@ function AdminCmsApp() {
       setMessage(error instanceof Error ? error.message : 'Gagal memuat CMS.')
     }
   }, [adminFetch, guestSearch, selectedEventId, token])
+
+  async function readContactFile(file: File | null) {
+    if (!file) return
+    if (!/\.(csv|vcf)$/i.test(file.name)) { setMessage('Pilih file .CSV atau .VCF.'); return }
+    try {
+      if (!guestQuota) { setMessage('Informasi quota paket belum tersedia. Refresh halaman lalu coba lagi.'); return }
+      const parsed = markDuplicates(parseContactFile(await file.text(), file.name), guests)
+      const rows = selectUpToCapacity(parsed, importCapacity)
+      setImportFilename(file.name)
+      setImportRows(rows)
+      setShowImportModal(true)
+      setMessage(rows.length ? `${Math.min(rows.length, importCapacity)} dari ${rows.length} kontak dipilih sesuai sisa quota ${guestQuota.plan_code}.` : 'File tidak berisi kontak yang dapat dibaca.')
+    } catch { setMessage('File kontak gagal dibaca.') }
+  }
+
+  function updateImportRow(id: string, patch: Partial<ContactImportRow>) {
+    setImportRows((current) => markDuplicates(current.map((row) => row.id === id ? { ...row, ...patch } : row), guests))
+  }
+
+  function toggleImportRow(id: string, selected: boolean) {
+    setImportRows((current) => {
+      const result = setRowSelectedWithinCapacity(current, id, selected, importCapacity)
+      if (result.limited) setMessage(`Quota paket ${guestQuota?.plan_code ?? ''} hanya menyisakan ${importCapacity} slot guest record.`)
+      return result.rows
+    })
+  }
+
+  function toggleAllImportRows(selected: boolean) {
+    setImportRows((current) => selected ? selectUpToCapacity(current, importCapacity) : current.map((row) => ({ ...row, selected: false })))
+    setMessage(selected && importRows.length > importCapacity ? `Pilih semua dibatasi ke ${importCapacity} kontak sesuai sisa quota paket ${guestQuota?.plan_code ?? ''}.` : selected ? 'Semua kontak yang muat quota dipilih.' : 'Semua pilihan dilepas.')
+  }
+
+  async function importContacts() {
+    if (!selectedEventId || importBusy) return
+    const selected = importRows.filter((row) => row.selected)
+    if (!selected.length) { setMessage('Pilih minimal satu kontak untuk diimpor.'); return }
+    if (selected.length > importCapacity) { setMessage(`Pilihan melebihi sisa quota terbaru (${importCapacity} guest record). Refresh lalu pilih ulang.`); return }
+    if (selected.some((row) => validateContact(row).length || row.duplicate)) { setMessage('Perbaiki data tidak valid atau hapus pilihan pada kontak duplikat.'); return }
+    setImportBusy(true)
+    try {
+      const json = await adminFetch<{ imported: number; invitations_sent: number }>(`/admin/events/${selectedEventId}/guests/import`, {
+        method: 'POST', body: JSON.stringify({ guests: selected.map((row) => ({ name: row.name.trim(), phone: normalizeImportedPhone(row.phone) || null, email: row.email.trim() || null, category: row.category, guest_count: row.guest_count })) }),
+      })
+      setShowImportModal(false); setImportRows([]); setImportFilename('')
+      setMessage(`${json.imported} kontak ditambahkan ke guest list. Tidak ada undangan yang dikirim.`)
+      await loadEvents(); await loadEventWorkspace()
+    } catch (error) {
+      await loadEventWorkspace()
+      setMessage(error instanceof Error && /Quota/i.test(error.message) ? 'Quota guest berubah atau sudah penuh. Data tidak diimpor; daftar dan sisa quota telah diperbarui.' : error instanceof Error ? error.message : 'Import kontak gagal.')
+    } finally { setImportBusy(false) }
+  }
 
   async function createGuest() {
     if (!selectedEventId) return
@@ -1242,7 +1308,10 @@ function AdminCmsApp() {
               </div>
             </div>
 
-            <button className="primary" type="button" onClick={() => openGuestForm()}><UserPlus size={17} /> Add Guest</button>
+            <div className="guestPrimaryActions">
+              <button className="primary" type="button" onClick={() => openGuestForm()}><UserPlus size={17} /> Add Guest</button>
+              <label className="buttonLike"><Upload size={17} /> Import kontak<input className="visuallyHidden" type="file" accept=".csv,.vcf,text/csv,text/vcard" onChange={(event) => { void readContactFile(event.target.files?.[0] ?? null); event.target.value = '' }} /></label>
+            </div>
 
             <div className="cmsGuestList">
               {(pageMode === 'overview' ? guests.slice(0, 5) : guests).map((guest) => (
@@ -1342,6 +1411,7 @@ function AdminCmsApp() {
 
         <p className="statusMessage">{message}</p>
       </section>
+      {showImportModal && <Modal title="Import kontak" description={`Tinjau ${importFilename}. Pilih dan edit kontak sebelum ditambahkan; proses ini tidak mengirim invitation atau WhatsApp.`} onClose={() => !importBusy && setShowImportModal(false)}><div className="contactImport"><div className="quotaSummary"><strong>Paket {guestQuota?.plan_code ?? '-'}</strong><span>{guestQuota?.guest_records_used ?? 0} / {guestQuota?.guest_limit ?? 0} guest record terpakai</span><span>{importCapacity} slot tersisa</span><small>Quota dihitung per guest record, bukan jumlah pax.</small></div><div className="importSummary"><strong aria-live="polite">{selectedImportCount} dipilih</strong><span>{importRows.filter((row) => row.errors.length).length} tidak valid · {importRows.filter((row) => row.duplicate).length} duplikat</span><label><input type="checkbox" checked={importRows.length > 0 && importRows.every((row) => row.selected)} disabled={importCapacity === 0} onChange={(event) => toggleAllImportRows(event.target.checked)} /> Pilih semua yang muat quota</label></div><div className="contactPreview">{importRows.map((row, index) => <article className={row.errors.length || row.duplicate ? 'hasError' : ''} key={row.id}><label className="contactSelect"><input type="checkbox" checked={row.selected} disabled={!row.selected && selectedImportCount >= importCapacity} onChange={(event) => toggleImportRow(row.id, event.target.checked)} /><span>Kontak {index + 1}</span></label><div className="contactFields"><label>Nama<input value={row.name} onChange={(event) => updateImportRow(row.id, { name: event.target.value })} /></label><label>WhatsApp<input inputMode="tel" value={row.phone} onChange={(event) => updateImportRow(row.id, { phone: event.target.value })} placeholder="081234567890" /></label><label>Email<input type="email" value={row.email} onChange={(event) => updateImportRow(row.id, { email: event.target.value })} /></label><label>Kategori<select value={row.category} onChange={(event) => updateImportRow(row.id, { category: event.target.value })}>{['Family','Friend','Colleague','VIP','Other'].map((item) => <option key={item}>{item}</option>)}</select></label><label>Jumlah<input min={1} max={20} type="number" value={row.guest_count} onChange={(event) => updateImportRow(row.id, { guest_count: Number(event.target.value) })} /></label></div>{row.duplicate && <p className="rowError">{row.duplicate}</p>}{row.errors.map((error) => <p className="rowError" key={error}>{error}</p>)}</article>)}</div>{importRows.length === 0 && <p>Tidak ada kontak yang terbaca. CSV harus memiliki header nama/name dan phone/whatsapp atau email.</p>}{importCapacity === 0 && <p className="rowError">Quota guest paket ini sudah penuh. Hapus guest atau upgrade paket sebelum mengimpor.</p>}<div className="modalActions"><button type="button" disabled={importBusy} onClick={() => setShowImportModal(false)}>Batal</button><button className="primary" type="button" disabled={importBusy || selectedImportCount === 0 || selectedImportCount > importCapacity || importRows.filter((row) => row.selected).some((row) => row.errors.length || row.duplicate)} onClick={importContacts}>{importBusy ? 'Mengimpor…' : 'Tambahkan ke guest list'}</button></div></div></Modal>}
       {showGuestModal && <Modal title={editingGuest ? 'Edit Guest' : 'Add Guest'} description="Isi identitas tamu dan jumlah orang dalam undangan." onClose={() => setShowGuestModal(false)}><div className="modalForm"><label>Nama lengkap<input autoFocus value={guestForm.name} onChange={(event) => setGuestForm({ ...guestForm, name: event.target.value })} /></label><label>WhatsApp<div className="phoneInput"><span>+62</span><input inputMode="numeric" value={guestForm.phone} onChange={(event) => setGuestForm({ ...guestForm, phone: event.target.value.replace(/\D/g, '') })} placeholder="81234567890" /></div><small>Masukkan nomor lokal tanpa angka 0 di depan.</small></label><label>Email (opsional)<input type="email" value={guestForm.email} onChange={(event) => setGuestForm({ ...guestForm, email: event.target.value })} /></label><label>Kategori<select value={guestForm.category} onChange={(event) => setGuestForm({ ...guestForm, category: event.target.value })}>{['Family','Friend','Colleague','VIP','Other'].map((item) => <option key={item}>{item}</option>)}</select></label><label>Jumlah tamu<input min={1} max={20} type="number" value={guestForm.guest_count} onChange={(event) => setGuestForm({ ...guestForm, guest_count: event.target.value })} /></label><div className="modalActions"><button type="button" onClick={() => setShowGuestModal(false)}>Batal</button><button className="primary" type="button" onClick={editingGuest ? saveGuest : createGuest}>{editingGuest ? 'Simpan Perubahan' : 'Tambah Tamu'}</button></div></div></Modal>}
       {showEventModal && <Modal title="Create Event" description="Buat event draft baru. Publish setelah detail siap." onClose={() => setShowEventModal(false)}><div className="modalForm"><label>Nama event<input autoFocus value={eventForm.name} onChange={(event) => setEventForm({ ...eventForm, name: event.target.value })} /></label><label>Tanggal<input type="date" value={eventForm.date} onChange={(event) => setEventForm({ ...eventForm, date: event.target.value })} /></label><label>Jenis<select value={eventForm.type} onChange={(event) => setEventForm({ ...eventForm, type: event.target.value })}>{['Wedding','Birthday','Engagement','Corporate','Gathering','Other'].map((item) => <option key={item}>{item}</option>)}</select></label><label>Venue (opsional)<input value={eventForm.venue_name} onChange={(event) => setEventForm({ ...eventForm, venue_name: event.target.value })} /></label><div className="modalActions"><button type="button" onClick={() => setShowEventModal(false)}>Batal</button><button className="primary" type="button" onClick={createEvent}>Buat Event Draft</button></div></div></Modal>}
     </main>

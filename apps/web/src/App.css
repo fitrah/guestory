@@ -1842,6 +1842,25 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .iconButton { width: 42px; padding: 0; flex: 0 0 auto; }
 .modalForm { gap: 16px; }
 .modalActions { padding-top: 8px; }
+.guestPrimaryActions { display:flex; flex-wrap:wrap; gap:10px; margin-bottom:4px; }
+.buttonLike { display:inline-flex; align-items:center; justify-content:center; gap:8px; min-height:42px; padding:0 15px; border:1px solid var(--line-strong); border-radius:10px; background:#fff; font-weight:700; cursor:pointer; }
+.visuallyHidden { position:absolute !important; width:1px !important; height:1px !important; padding:0 !important; margin:-1px !important; overflow:hidden !important; clip:rect(0,0,0,0) !important; white-space:nowrap !important; border:0 !important; }
+.modalCard:has(.contactImport) { width:min(980px, 100%); }
+.contactImport { display:grid; gap:14px; }
+.quotaSummary { display:grid; grid-template-columns:repeat(3, auto); align-items:center; gap:8px 16px; padding:13px; border:1px solid #cce7e2; border-radius:11px; background:var(--brand-soft); color:var(--brand-dark); }
+.quotaSummary small { grid-column:1 / -1; color:var(--muted); }
+.importSummary { display:flex; align-items:center; flex-wrap:wrap; gap:12px; padding:12px; border-radius:10px; background:var(--surface-subtle); color:var(--muted); }
+.importSummary strong { color:var(--ink); }
+.importSummary label { margin-left:auto; display:flex; align-items:center; gap:7px; font-weight:700; }
+.importSummary input, .contactSelect input { width:auto; min-height:auto; }
+.contactPreview { display:grid; gap:10px; max-height:52vh; overflow:auto; padding-right:3px; }
+.contactPreview article { padding:13px; border:1px solid var(--line); border-radius:12px; }
+.contactPreview article.hasError { border-color:#e6aaa3; background:#fff9f8; }
+.contactSelect { display:flex; align-items:center; gap:8px; margin-bottom:10px; font-weight:800; }
+.contactFields { display:grid; grid-template-columns:1.4fr 1.2fr 1.3fr 1fr 90px; gap:9px; }
+.contactFields label { display:grid; gap:5px; color:var(--muted); font-size:12px; font-weight:700; }
+.contactFields input, .contactFields select { width:100%; min-width:0; min-height:40px; padding:7px 9px; }
+.rowError { margin:7px 0 0; color:#a53d32; font-size:12px; font-weight:700; }
 input, select, textarea, .adminCmsLogin input, .topbar select, .inlineActions input, .guestCreateRow input, .guestCreateRow select, .modalForm input, .modalForm select, .settingsForm input, .receiverLogin input, .receiverStatus select, .manualToken input, .countStepper input { border-color: var(--line-strong); border-radius: 10px; background: #fff; min-height: 44px; }
 
 @media (max-width: 1020px) {
@@ -1875,6 +1894,10 @@ input, select, textarea, .adminCmsLogin input, .topbar select, .inlineActions in
   .modalBackdrop { align-items: end; padding: 0; }
   .modalCard { width: 100%; max-height: 92vh; border-radius: 20px 20px 0 0; padding: 20px 18px calc(20px + env(safe-area-inset-bottom)); }
   .modalActions button { flex: 1; }
+  .contactFields { grid-template-columns:1fr; }
+  .quotaSummary { grid-template-columns:1fr; }
+  .quotaSummary small { grid-column:auto; }
+  .importSummary label { margin-left:0; width:100%; }
 }
 
 .sidebarEventPicker { display:grid; gap:.35rem; margin:.75rem; padding:.75rem; border:1px solid rgba(255,255,255,.14); border-radius:12px; background:rgba(255,255,255,.07); color:inherit }

@@ -813,6 +813,44 @@ Route::middleware(['guestory.auth', 'guestory.role:EVENT_OWNER,SUPERADMIN'])->gr
             ], 422);
         }
 
+        $normalizedRows = [];
+        $seenPhones = [];
+        $seenEmails = [];
+        $existingPhones = $event->guests()->whereNotNull('phone')->pluck('phone')->map(fn ($phone) => normalizeWhatsAppRecipient((string) $phone))->flip();
+        $existingEmails = $event->guests()->whereNotNull('email')->pluck('email')->map(fn ($email) => Str::lower(trim((string) $email)))->flip();
+        $duplicates = [];
+
+        foreach ($rows as $index => $row) {
+            $row['name'] = trim((string) ($row['name'] ?? ''));
+            $row['email'] = filled($row['email'] ?? null) ? Str::lower(trim((string) $row['email'])) : null;
+            $row['phone'] = filled($row['phone'] ?? null) ? normalizeWhatsAppRecipient((string) $row['phone']) : null;
+            $validator = validator($row, [
+                'name' => ['required', 'string', 'max:160'],
+                'phone' => ['nullable', 'string', 'regex:/^62[1-9][0-9]{7,13}$/'],
+                'email' => ['nullable', 'email', 'max:160'],
+                'category' => ['nullable', 'string', 'max:80'],
+                'guest_count' => ['nullable', 'integer', 'min:1', 'max:20'],
+            ]);
+            if ($validator->fails()) {
+                return response()->json([
+                    'code' => 'GUEST_IMPORT_INVALID', 'message' => 'Baris import tidak valid.', 'row' => $index + 1,
+                    'errors' => $validator->errors()->toArray(),
+                ], 422);
+            }
+            $duplicateReason = null;
+            if ($row['phone'] && (isset($seenPhones[$row['phone']]) || $existingPhones->has($row['phone']))) $duplicateReason = 'phone';
+            if ($row['email'] && (isset($seenEmails[$row['email']]) || $existingEmails->has($row['email']))) $duplicateReason = $duplicateReason ? 'phone_and_email' : 'email';
+            if ($duplicateReason) $duplicates[] = ['row' => $index + 1, 'name' => $row['name'], 'reason' => $duplicateReason];
+            if ($row['phone']) $seenPhones[$row['phone']] = true;
+            if ($row['email']) $seenEmails[$row['email']] = true;
+            $normalizedRows[] = $row;
+        }
+
+        if ($duplicates !== []) {
+            return response()->json(['code' => 'GUEST_IMPORT_DUPLICATES', 'message' => 'Import mengandung kontak yang sudah ada atau berulang.', 'duplicates' => $duplicates], 422);
+        }
+        $rows = $normalizedRows;
+
         $result = DB::transaction(function () use ($event, $rows, $billing) {
             $lockedEvent = Event::query()->whereKey($event->id)->lockForUpdate()->firstOrFail();
             $current = $lockedEvent->guests()->count();
@@ -846,6 +884,7 @@ Route::middleware(['guestory.auth', 'guestory.role:EVENT_OWNER,SUPERADMIN'])->gr
 
         return response()->json([
             'imported' => count($created),
+            'invitations_sent' => 0,
             'guests' => collect($created)->map(fn (Guest $guest) => guestPayload($guest)),
         ], 201);
     });
@@ -1201,7 +1240,7 @@ Route::middleware(['guestory.auth', 'guestory.role:EVENT_OWNER,SUPERADMIN'])->gr
     });
 });
 
-Route::middleware(['guestory.auth', 'guestory.role:EVENT_OWNER,SUPERADMIN'])->get('/admin/events/{event}/dashboard', function (Request $request, Event $event) {
+Route::middleware(['guestory.auth', 'guestory.role:EVENT_OWNER,SUPERADMIN'])->get('/admin/events/{event}/dashboard', function (Request $request, Event $event, GuestoryBilling $billing) {
     if ($event->owner_id !== $request->user()->id) {
         return response()->json([
             'code' => 'EVENT_FORBIDDEN',
@@ -1210,6 +1249,8 @@ Route::middleware(['guestory.auth', 'guestory.role:EVENT_OWNER,SUPERADMIN'])->ge
     }
 
     $totalGuests = $event->guests()->count();
+    $entitlements = $billing->effectiveEntitlements($event->load('billing'));
+    $guestLimit = (int) $entitlements['guest_limit'];
     $confirmedGuests = $event->guests()->where('rsvp_status', 'ATTENDING')->sum('guest_count');
     $checkedIn = $event->checkIns()->sum('actual_guest_count');
     $notCheckedIn = max($event->guests()->sum('guest_count') - $checkedIn, 0);
@@ -1220,6 +1261,13 @@ Route::middleware(['guestory.auth', 'guestory.role:EVENT_OWNER,SUPERADMIN'])->ge
             'name' => $event->name,
             'status' => $event->status,
             'date' => $event->date?->toDateString(),
+        ],
+        'quota' => [
+            'plan_code' => $event->billing && in_array($event->billing->status, ['ACTIVE', 'PAID'], true) ? $event->billing->plan_code : 'FREE',
+            'guest_limit' => $guestLimit,
+            'guest_records_used' => $totalGuests,
+            'guest_records_remaining' => max($guestLimit - $totalGuests, 0),
+            'semantics' => 'Guest quota counts guest records, not guest_count headcount.',
         ],
         'metrics' => [
             'total_guests' => $totalGuests,

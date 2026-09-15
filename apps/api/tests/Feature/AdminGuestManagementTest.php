@@ -78,18 +78,21 @@ class AdminGuestManagementTest extends TestCase
             'guests' => [
                 [
                     'name' => 'Rafi Hidayat',
+                    'phone' => '081234567801',
                     'category' => 'Family',
                     'guest_count' => 3,
                 ],
                 [
                     'guest_code' => 'VIP-001',
                     'name' => 'Dewi Lestari',
+                    'email' => 'dewi-import@example.com',
                     'category' => 'VIP',
                 ],
             ],
         ], $this->adminAuthHeaders())
             ->assertCreated()
             ->assertJsonPath('imported', 2)
+            ->assertJsonPath('invitations_sent', 0)
             ->assertJsonPath('guests.1.guest_code', 'VIP-001');
 
         $this->assertDatabaseHas('guests', [
@@ -97,6 +100,38 @@ class AdminGuestManagementTest extends TestCase
             'name' => 'Rafi Hidayat',
             'guest_count' => 3,
         ]);
+    }
+
+    public function test_contact_import_normalizes_indonesian_numbers_and_creates_no_invitation(): void
+    {
+        $this->seed();
+        $event = Event::where('name', 'Andi & Sinta Wedding')->firstOrFail();
+
+        $response = $this->postJson("/api/admin/events/{$event->id}/guests/import", ['guests' => [[
+            'name' => 'Kontak Baru', 'phone' => '0812-3456-7890', 'email' => 'KONTAK@EXAMPLE.COM',
+        ]]], $this->adminAuthHeaders());
+
+        $response->assertCreated()->assertJsonPath('guests.0.phone', '6281234567890');
+        $guestId = $response->json('guests.0.id');
+        $this->assertDatabaseHas('guests', ['id' => $guestId, 'phone' => '6281234567890', 'email' => 'kontak@example.com']);
+        $this->assertDatabaseMissing('invitations', ['guest_id' => $guestId]);
+    }
+
+    public function test_contact_import_rejects_in_file_duplicates_atomically(): void
+    {
+        $this->seed();
+        $event = Event::where('name', 'Andi & Sinta Wedding')->firstOrFail();
+        $before = $event->guests()->count();
+
+        $this->postJson("/api/admin/events/{$event->id}/guests/import", ['guests' => [
+            ['name' => 'Satu', 'phone' => '081234567899'],
+            ['name' => 'Dua', 'phone' => '+62 812-3456-7899'],
+        ]], $this->adminAuthHeaders())
+            ->assertUnprocessable()
+            ->assertJsonPath('code', 'GUEST_IMPORT_DUPLICATES')
+            ->assertJsonCount(1, 'duplicates');
+
+        $this->assertSame($before, $event->guests()->count());
     }
 
     public function test_guest_management_is_scoped_to_event_owner(): void

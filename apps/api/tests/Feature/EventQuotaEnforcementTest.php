@@ -37,6 +37,20 @@ class EventQuotaEnforcementTest extends TestCase
         $this->assertSame(50, $event->guests()->count());
     }
 
+    public function test_dashboard_exposes_effective_guest_record_allowance(): void
+    {
+        $event = $this->event();
+        $this->guests($event, 49);
+
+        $this->getJson("/api/admin/events/{$event->id}/dashboard", $this->headers())
+            ->assertOk()
+            ->assertJsonPath('quota.plan_code', 'FREE')
+            ->assertJsonPath('quota.guest_limit', 50)
+            ->assertJsonPath('quota.guest_records_used', 49)
+            ->assertJsonPath('quota.guest_records_remaining', 1)
+            ->assertJsonPath('quota.semantics', 'Guest quota counts guest records, not guest_count headcount.');
+    }
+
     public function test_import_overflow_is_rejected_all_or_nothing(): void
     {
         $event = $this->event();
@@ -44,7 +58,9 @@ class EventQuotaEnforcementTest extends TestCase
 
         $this->postJson("/api/admin/events/{$event->id}/guests/import", ['guests' => [['name' => 'One'], ['name' => 'Two']]], $this->headers())
             ->assertUnprocessable()->assertJsonPath('code', 'GUEST_LIMIT_EXCEEDED')
-            ->assertJsonPath('current', 49)->assertJsonPath('limit', 50)->assertJsonPath('requested', 2);
+            ->assertJsonPath('message', 'Quota guest records event terlampaui.')
+            ->assertJsonPath('current', 49)->assertJsonPath('limit', 50)->assertJsonPath('requested', 2)
+            ->assertJsonPath('semantics', 'Guest quota counts guest records, not guest_count headcount.');
         $this->assertSame(49, $event->guests()->count());
     }
 

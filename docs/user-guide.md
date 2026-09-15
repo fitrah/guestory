@@ -265,9 +265,30 @@ Guest code dibuat otomatis bila tidak diberikan oleh proses impor/API.
 
 Menghapus tamu juga menghapus data invitation, QR, dan attendance terkait. Tindakan ini bukan arsip dan tidak tersedia tombol pemulihan di UI.
 
-#### Import dan export tamu
+#### Import kontak VCF/CSV
 
-Guestory backend mendukung impor CSV dan ekspor CSV tamu, tetapi deployed UI `main` saat ini **belum menyediakan kontrol Import/Export pada halaman Guests**. Untuk operasi massal, gunakan proses operasional resmi yang dijalankan pengelola sistem. Format data yang didukung mencakup `guest_code`, `name`, `phone`, `email`, `category`, `group_name`, `guest_count`, `table_number`, dan `notes`; jangan mengunggah file melalui halaman lain.
+1. Ekspor kontak yang diperlukan:
+   - **iPhone/iCloud:** buka `iCloud.com/contacts`, pilih kontak, lalu gunakan **Export vCard** untuk menghasilkan `.vcf`.
+   - **Android:** buka Contacts, gunakan **Fix & manage/Kelola kontak → Export to file**, pilih akun/kontak, lalu simpan `.vcf`.
+   - **Google Contacts:** buka `contacts.google.com`, pilih kontak → **Export**, lalu pilih **Google CSV** (`.csv`) atau **vCard** (`.vcf`).
+2. Di **Workspace → Guests**, pilih **Import kontak** dan unggah file `.vcf` atau `.csv`.
+3. Untuk CSV, header yang dikenali adalah:
+   - nama: `name`, `nama`, `full_name`, `nama_lengkap`;
+   - telepon: `phone`, `tel`, `telephone`, `whatsapp`, `wa`, `nomor_hp`, `no_hp`;
+   - `email`/`e_mail`;
+   - `category`/`kategori`;
+   - `guest_count`/`jumlah_tamu`.
+4. Tinjau preview. Edit nama, nomor, email, kategori, atau jumlah tamu, lalu centang hanya kontak yang akan ditambahkan.
+5. Perhatikan paket aktif, guest record terpakai, slot tersisa, dan counter pilihan. **Pilih semua** hanya memilih sebanyak sisa quota.
+6. Perbaiki atau lepas pilihan pada data invalid dan duplikat sebelum memilih **Tambahkan ke guest list**.
+
+Nomor Indonesia dalam bentuk `08…`, `+62…`, atau `0062…` dinormalisasi ke format `62…`. Duplikat nomor/email diperiksa terhadap guest list event dan antarbaris file. Quota dihitung per **guest record**, bukan pax pada `guest_count`. Jika quota berubah saat preview terbuka, backend menolak seluruh import tanpa menyimpan sebagian dan UI memperbarui quota.
+
+Import hanya menambah guest list. Import **tidak membuat atau mengirim invitation, WhatsApp, maupun QR**.
+
+#### Export guest list
+
+Gunakan endpoint/proses export CSV resmi bila diperlukan. Kolom export lengkap mencakup `guest_code`, `name`, `phone`, `email`, `category`, `group_name`, `guest_count`, `table_number`, status RSVP/invitation/attendance, dan `notes`.
 
 ### 5.4 Undangan personal dan QR
 
