@@ -2508,6 +2508,7 @@ function GuestInvitation({ token }: { token: string }) {
   const [invite, setInvite] = useState<InvitePayload | null>(null)
   const [photos, setPhotos] = useState<AlbumPhoto[]>([])
   const [selectedPhoto, setSelectedPhoto] = useState<File | null>(null)
+  const [photoUploading, setPhotoUploading] = useState(false)
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [message, setMessage] = useState('Memuat undangan...')
 
@@ -2576,29 +2577,36 @@ function GuestInvitation({ token }: { token: string }) {
   }
 
   async function uploadPhoto() {
-    if (!selectedPhoto) {
-      setMessage('Pilih foto dulu sebelum upload.')
+    if (!selectedPhoto || photoUploading) {
+      if (!selectedPhoto) setMessage('Pilih foto dulu sebelum upload.')
       return
     }
 
     const formData = new FormData()
     formData.append('photo', selectedPhoto)
+    setPhotoUploading(true)
     setMessage('Mengupload foto...')
 
-    const response = await fetch(`${API_BASE}/invite/${token}/photos`, {
-      method: 'POST',
-      headers: { Accept: 'application/json' },
-      body: formData,
-    })
-    const json = await response.json()
+    try {
+      const response = await fetch(`${API_BASE}/invite/${token}/photos`, {
+        method: 'POST',
+        headers: { Accept: 'application/json' },
+        body: formData,
+      })
+      const json = await response.json()
 
-    if (!response.ok) {
-      setMessage(json.message ?? 'Foto gagal diupload. Silakan coba lagi.')
-      return
+      if (!response.ok) {
+        setMessage(json.message ?? 'Foto gagal diupload. Silakan coba lagi.')
+        return
+      }
+
+      setSelectedPhoto(null)
+      setMessage('Foto berhasil diupload dan menunggu persetujuan admin.')
+    } catch {
+      setMessage('Koneksi terputus saat upload. Silakan coba lagi.')
+    } finally {
+      setPhotoUploading(false)
     }
-
-    setSelectedPhoto(null)
-    setMessage('Foto berhasil diupload dan menunggu persetujuan admin.')
   }
 
   if (status === 'loading' || !invite) {
@@ -2619,7 +2627,7 @@ function GuestInvitation({ token }: { token: string }) {
     )
   }
 
-  return <main className="publicInvitationPage"><InvitationRenderer invite={invite} qrUrl={`${API_BASE}/invite/${token}/qr.svg`} photos={photos} slideshowAssets={invite.slideshow_assets ?? []} message={message} selectedPhotoName={selectedPhoto?.name} onRsvp={updateRsvp} onPhotoSelect={setSelectedPhoto} onPhotoUpload={uploadPhoto} assetUrl={absoluteAssetUrl} /></main>
+  return <main className="publicInvitationPage"><InvitationRenderer invite={invite} qrUrl={`${API_BASE}/invite/${token}/qr.svg`} photos={photos} slideshowAssets={invite.slideshow_assets ?? []} message={message} selectedPhotoName={selectedPhoto?.name} photoUploading={photoUploading} onRsvp={updateRsvp} onPhotoSelect={setSelectedPhoto} onPhotoUpload={uploadPhoto} assetUrl={absoluteAssetUrl} /></main>
 }
 
 function AdminPrototype() {

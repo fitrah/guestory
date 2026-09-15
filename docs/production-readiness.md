@@ -74,6 +74,7 @@ npm run build:web
 composer --working-dir=apps/api install --no-dev --optimize-autoloader
 cd apps/api
 php artisan migrate --force
+php artisan storage:link --force
 php artisan optimize:clear
 php artisan config:cache
 php artisan view:cache
@@ -88,7 +89,7 @@ Route cache is intentionally skipped for now because the MVP API still uses clos
 - API health: `GET /api/health`
 - Laravel framework health: `GET /up`
 - Frontend: `GET /admin`
-- Storage: `GET /storage/...` for approved photo URLs
+- Storage: confirm `apps/api/public/storage` resolves to the current release's `storage/app/public`, then verify an uploaded photo URL under `/storage/...` returns HTTP 200. Never copy a storage symlink from a different workspace or release path.
 
 ## Nginx
 
