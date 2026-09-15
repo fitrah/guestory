@@ -27,7 +27,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import './App.css'
 import { useSelectedEventId } from './eventSelection'
 import './invitation-builder.css'
-import { InvitationBuilderPage, InvitationRenderer, type InvitationConfig } from './InvitationBuilder'
+import { InvitationBuilderPage, InvitationRenderer, type AlbumMeta, type InvitationConfig } from './InvitationBuilder'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? '/api'
 
@@ -2507,6 +2507,9 @@ function QrCameraScanner({ onScan, onError }: { onScan: (token: string) => void;
 function GuestInvitation({ token }: { token: string }) {
   const [invite, setInvite] = useState<InvitePayload | null>(null)
   const [photos, setPhotos] = useState<AlbumPhoto[]>([])
+  const [albumMeta, setAlbumMeta] = useState<AlbumMeta | undefined>()
+  const [albumLoading, setAlbumLoading] = useState(false)
+  const [albumError, setAlbumError] = useState('')
   const [selectedPhoto, setSelectedPhoto] = useState<File | null>(null)
   const [photoUploading, setPhotoUploading] = useState(false)
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
@@ -2527,11 +2530,12 @@ function GuestInvitation({ token }: { token: string }) {
         }
 
         const inviteJson = (await inviteResponse.json()) as InvitePayload
-        const albumJson = albumResponse.ok ? await albumResponse.json() : { photos: [] }
+        const albumJson = albumResponse.ok ? await albumResponse.json() : { photos: [], meta: undefined }
 
         if (!cancelled) {
           setInvite(inviteJson)
           setPhotos(albumJson.photos ?? [])
+          setAlbumMeta(albumJson.meta)
           setStatus('ready')
           setMessage('')
         }
@@ -2549,6 +2553,29 @@ function GuestInvitation({ token }: { token: string }) {
       cancelled = true
     }
   }, [token])
+
+  async function loadAlbumPage(page: number) {
+    const section = document.getElementById('guest-photo-album')
+    const sectionTop = section?.getBoundingClientRect().top
+    setAlbumLoading(true)
+    setAlbumError('')
+    try {
+      const response = await fetch(`${API_BASE}/invite/${token}/album?page=${page}&per_page=${albumMeta?.per_page ?? 12}`, { headers: { Accept: 'application/json' } })
+      const json = await response.json()
+      if (!response.ok) throw new Error(json.message ?? 'Galeri foto gagal dimuat.')
+      setPhotos(json.photos ?? [])
+      setAlbumMeta(json.meta)
+      window.requestAnimationFrame(() => {
+        if (sectionTop === undefined) return
+        const nextTop = document.getElementById('guest-photo-album')?.getBoundingClientRect().top
+        if (nextTop !== undefined) window.scrollBy({ top: nextTop - sectionTop, behavior: 'auto' })
+      })
+    } catch (error) {
+      setAlbumError(error instanceof Error ? error.message : 'Koneksi bermasalah saat memuat galeri.')
+    } finally {
+      setAlbumLoading(false)
+    }
+  }
 
   async function updateRsvp(rsvpStatus: 'ATTENDING' | 'DECLINED') {
     if (!invite) return
@@ -2627,7 +2654,7 @@ function GuestInvitation({ token }: { token: string }) {
     )
   }
 
-  return <main className="publicInvitationPage"><InvitationRenderer invite={invite} qrUrl={`${API_BASE}/invite/${token}/qr.svg`} photos={photos} slideshowAssets={invite.slideshow_assets ?? []} message={message} selectedPhotoName={selectedPhoto?.name} photoUploading={photoUploading} onRsvp={updateRsvp} onPhotoSelect={setSelectedPhoto} onPhotoUpload={uploadPhoto} assetUrl={absoluteAssetUrl} /></main>
+  return <main className="publicInvitationPage"><InvitationRenderer invite={invite} qrUrl={`${API_BASE}/invite/${token}/qr.svg`} photos={photos} slideshowAssets={invite.slideshow_assets ?? []} albumMeta={albumMeta} albumLoading={albumLoading} albumError={albumError} onAlbumPageChange={loadAlbumPage} message={message} selectedPhotoName={selectedPhoto?.name} photoUploading={photoUploading} onRsvp={updateRsvp} onPhotoSelect={setSelectedPhoto} onPhotoUpload={uploadPhoto} assetUrl={absoluteAssetUrl} /></main>
 }
 
 function AdminPrototype() {
@@ -2818,13 +2845,11 @@ function extractQrToken(value: string) {
 }
 
 function absoluteAssetUrl(value: string) {
-  if (value.startsWith('http://') || value.startsWith('https://')) {
+  try {
+    return new URL(value, new URL(API_BASE.replace(/\/api\/?$/, '') || '/', window.location.origin)).href
+  } catch {
     return value
   }
-
-  const apiRoot = API_BASE.replace(/\/api\/?$/, '')
-
-  return `${apiRoot}${value.startsWith('/') ? value : `/${value}`}`
 }
 
 export default App

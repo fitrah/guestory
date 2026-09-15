@@ -1587,26 +1587,48 @@ Route::get('/invite/{token}/qr.svg', function (string $token) {
     ]);
 })->middleware('throttle:60,1');
 
-Route::get('/invite/{token}/album', function (string $token) {
+Route::get('/invite/{token}/album', function (Request $request, string $token) {
     $invitation = findPublicInvitation($token);
 
     if (! $invitation instanceof Invitation) {
         return $invitation;
     }
 
+    $data = $request->validate([
+        'page' => ['sometimes', 'integer', 'min:1'],
+        'per_page' => ['sometimes', 'integer', 'min:1', 'max:24'],
+    ]);
+    $perPage = (int) ($data['per_page'] ?? 12);
+
     $photos = $invitation->event->photos()
         ->with('guest:id,name')
         ->where('status', 'APPROVED')
-        ->latest('uploaded_at')
-        ->get()
-        ->map(fn ($photo) => photoPayload($photo));
+        ->orderByDesc('uploaded_at')
+        ->orderByDesc('id')
+        ->paginate($perPage)
+        ->withQueryString();
+
+    $photoItems = $photos->getCollection()->map(fn ($photo) => photoPayload($photo));
 
     return [
         'event' => [
             'id' => $invitation->event->id,
             'name' => $invitation->event->name,
         ],
-        'photos' => $photos,
+        // Keep this top-level array for existing album consumers.
+        'photos' => $photoItems,
+        'meta' => [
+            'current_page' => $photos->currentPage(),
+            'last_page' => $photos->lastPage(),
+            'per_page' => $photos->perPage(),
+            'total' => $photos->total(),
+            'from' => $photos->firstItem(),
+            'to' => $photos->lastItem(),
+            'has_next_page' => $photos->hasMorePages(),
+            'has_previous_page' => $photos->currentPage() > 1,
+            'next_page_url' => $photos->nextPageUrl(),
+            'previous_page_url' => $photos->previousPageUrl(),
+        ],
     ];
 })->middleware('throttle:60,1');
 

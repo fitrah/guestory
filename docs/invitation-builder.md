@@ -40,6 +40,7 @@ The PUT body contains `theme`, exactly six uniquely identified `sections` with u
 - Stored files live on the public disk under `events/{event}/invitation-design/`. Failed database writes remove newly stored files; deletion removes storage before deleting the database row so a failed storage deletion leaves the record retryable.
 - `GET /api/invite/{token}` exposes `slideshow_assets` with only `id`, public `url`, display `order`, and `is_cover`. It does not expose storage paths, filenames, MIME metadata, sizes, or guest album records.
 - Builder preview and the public slideshow consume only `slideshow_assets`. The Photos & Album section continues to consume the approved album endpoint and guest uploads continue to enter moderation unchanged.
+- The Photos & Album section now has its own approved guest-photo highlights and server-paginated grid; see [Approved Guest Photo Album](guest-photo-album.md). This remains entirely separate from the owner-managed invitation design slideshow.
 - Zero slideshow assets renders a quiet fallback and remains compatible with existing events/configs. One asset renders without autoplay or redundant navigation controls.
 
 ## Verification
