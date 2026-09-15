@@ -1876,3 +1876,9 @@ input, select, textarea, .adminCmsLogin input, .topbar select, .inlineActions in
   .modalCard { width: 100%; max-height: 92vh; border-radius: 20px 20px 0 0; padding: 20px 18px calc(20px + env(safe-area-inset-bottom)); }
   .modalActions button { flex: 1; }
 }
+
+.sidebarEventPicker { display:grid; gap:.35rem; margin:.75rem; padding:.75rem; border:1px solid rgba(255,255,255,.14); border-radius:12px; background:rgba(255,255,255,.07); color:inherit }
+.sidebarEventPicker span { font-size:.7rem; text-transform:uppercase; letter-spacing:.08em; opacity:.72 }
+.sidebarEventPicker select { width:100%; min-width:0 }
+.sidebarEventPicker strong { font-size:.78rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+.historyList button { width:100%; text-align:left }

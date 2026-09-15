@@ -25,6 +25,7 @@ import {
 import type { Html5Qrcode as Html5QrcodeInstance } from 'html5-qrcode'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import './App.css'
+import { useSelectedEventId } from './eventSelection'
 import './invitation-builder.css'
 import { InvitationBuilderPage, InvitationRenderer, type InvitationConfig } from './InvitationBuilder'
 
@@ -250,9 +251,14 @@ const emptyGuestForm = { name: '', phone: '', email: '', category: 'Other', gues
 
 function AdminSidebar({ active }: { active: string }) {
   const [open, setOpen] = useState(false)
+  const token = window.localStorage.getItem('guestory_admin_token') ?? ''
+  const [events, setEvents] = useState<AdminEventLite[]>([])
+  const [selectedEventId, setSelectedEventId] = useSelectedEventId()
   const groups = [
     { label: 'Workspace', links: [
-      { href: '/admin', label: 'Overview & Guests', Icon: LayoutDashboard },
+      { href: '/admin', label: 'Overview', Icon: LayoutDashboard },
+      { href: '/admin/events', label: 'Events', Icon: CalendarDays },
+      { href: '/admin/guests', label: 'Guests', Icon: Users },
       { href: '/admin/invitation-builder', label: 'Invitation Builder', Icon: CalendarDays },
       { href: '/admin/attendance', label: 'Attendance', Icon: BookOpenCheck },
       { href: '/admin/receivers', label: 'Receivers', Icon: Users },
@@ -265,11 +271,23 @@ function AdminSidebar({ active }: { active: string }) {
     ] },
   ]
 
+  useEffect(() => {
+    if (!token) return
+    fetch(`${API_BASE}/admin/events`, { headers: { Accept: 'application/json', Authorization: `Bearer ${token}` } })
+      .then(async (response) => response.ok ? response.json() : Promise.reject())
+      .then((json) => {
+        const next = json.events ?? []
+        setEvents(next)
+        if (!next.some((event: AdminEventLite) => event.id === selectedEventId)) setSelectedEventId(next[0]?.id ?? null)
+      }).catch(() => undefined)
+  }, [selectedEventId, setSelectedEventId, token])
+
   return <>
     <button className="mobileNavToggle" type="button" aria-label="Buka navigasi admin" aria-expanded={open} onClick={() => setOpen(true)}><Menu size={20} /><span>Menu</span></button>
     {open && <button className="sidebarScrim" type="button" aria-label="Tutup navigasi admin" onClick={() => setOpen(false)} />}
     <aside className={`sidebar ${open ? 'isOpen' : ''}`}>
       <div className="sidebarHeader"><a className="brandMark" href="/admin"><div className="brandGlyph">G</div><div><strong>Guestory</strong><span>Event administration</span></div></a><button className="sidebarClose" type="button" aria-label="Tutup navigasi" onClick={() => setOpen(false)}><X size={19} /></button></div>
+      <label className="sidebarEventPicker"><span>Current event</span><select aria-label="Current event" value={selectedEventId ?? ''} onChange={(event) => setSelectedEventId(Number(event.target.value))}>{events.map((event) => <option key={event.id} value={event.id}>{event.name}</option>)}</select><strong>{events.find((event) => event.id === selectedEventId)?.name ?? 'No event selected'}</strong></label>
       <nav className="navList" aria-label="Guestory admin navigation">
         {groups.map((group) => <div className="navGroup" key={group.label}><span className="navGroupLabel">{group.label}</span>{group.links.map(({ href, label, Icon }) => <a aria-current={active === href ? 'page' : undefined} className={active === href ? 'active' : ''} href={href} key={href}><Icon size={18} /><span>{label}</span></a>)}</div>)}
       </nav>
@@ -280,10 +298,12 @@ function AdminSidebar({ active }: { active: string }) {
 
 function Modal({ title, description, onClose, children }: { title: string; description: string; onClose: () => void; children: ReactNode }) {
   const dialogRef = useRef<HTMLElement>(null)
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
   useEffect(() => {
     const previousFocus = document.activeElement as HTMLElement | null
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
+      if (event.key === 'Escape') onCloseRef.current()
       if (event.key !== 'Tab' || !dialogRef.current) return
       const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href]'))
       if (!focusable.length) return
@@ -296,7 +316,7 @@ function Modal({ title, description, onClose, children }: { title: string; descr
     document.body.style.overflow = 'hidden'
     window.requestAnimationFrame(() => dialogRef.current?.querySelector<HTMLElement>('input, select, button')?.focus())
     return () => { document.removeEventListener('keydown', onKeyDown); document.body.style.overflow = ''; previousFocus?.focus() }
-  }, [onClose])
+  }, [])
   return <div className="modalBackdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section ref={dialogRef} className="modalCard" role="dialog" aria-modal="true" aria-labelledby="modal-title" aria-describedby="modal-description"><header><div><p className="eyebrow">Guestory Admin</p><h2 id="modal-title">{title}</h2><p id="modal-description">{description}</p></div><button className="iconButton" type="button" aria-label="Tutup" onClick={onClose}><X size={18} /></button></header>{children}</section></div>
 }
 
@@ -792,7 +812,7 @@ function SuperadminUsersPage() {
 function AdminReceiversPage() {
   const [token, setToken] = useState(() => window.localStorage.getItem('guestory_admin_token') ?? '')
   const [events, setEvents] = useState<AdminEventLite[]>([])
-  const [selectedEventId, setSelectedEventId] = useState<number | null>(null)
+  const [selectedEventId, setSelectedEventId] = useSelectedEventId()
   const [receivers, setReceivers] = useState<EventReceiverAssignment[]>([])
   const [form, setForm] = useState({ name: '', email: '', eventIds: [] as number[] })
   const [message, setMessage] = useState('Pilih event untuk mengelola petugas.')
@@ -847,15 +867,16 @@ function AdminReceiversPage() {
   useEffect(() => { if (selectedEventId) loadReceivers(selectedEventId).catch((error) => setMessage(error.message)) }, [loadReceivers, selectedEventId])
 
   if (!token) return <main className="adminCmsPage"><section className="adminCmsLogin"><h1>Login melalui Admin CMS</h1><a className="landingPrimary" href="/admin">Buka Admin</a><p>{message}</p></section></main>
-  return <main className="adminCmsShell"><AdminSidebar active="/admin/receivers" /><section className="workspace"><header className="topbar"><div><p className="eyebrow">Admin → Event → Petugas</p><h1>Petugas event</h1><span>Akun dapat bertugas di banyak event tanpa mengubah role pemilik event.</span></div><select value={selectedEventId ?? ''} onChange={(e) => setSelectedEventId(Number(e.target.value))}>{events.map((event) => <option key={event.id} value={event.id}>{event.name}</option>)}</select></header><section className="mainGrid"><article className="adminPanel"><div className="sectionHeader"><div><p className="eyebrow">Assignments</p><h2>Daftar petugas</h2></div><button onClick={() => selectedEventId && loadReceivers(selectedEventId)}><RefreshCw size={17} /> Refresh</button></div><div className="receiverAssignmentList">{receivers.map((receiver) => <article key={receiver.user_id}><div><strong>{receiver.name}</strong><small>{receiver.email}</small></div><span>{receiver.account_role}</span><span>{receiver.account_status}</span><span>{receiver.assignment_status}</span><div className="inlineActions">{receiver.activation_required && <button onClick={() => resendActivation(receiver)}>Resend aktivasi</button>} {receiver.assignment_status === 'ACTIVE' && <button onClick={() => revoke(receiver)}>Cabut akses</button>}</div></article>)}{receivers.length === 0 && <p>Belum ada petugas untuk event ini.</p>}</div></article><aside className="adminPanel"><p className="eyebrow">Invite / assign</p><h2>Tambah petugas</h2><label>Nama (wajib untuk akun baru)<input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label><label>Email<input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></label><fieldset className="eventChecklist"><legend>Tugaskan ke event milik Anda</legend>{events.map((event) => <label key={event.id}><input type="checkbox" checked={form.eventIds.includes(event.id)} onChange={(e) => setForm({ ...form, eventIds: e.target.checked ? [...form.eventIds, event.id] : form.eventIds.filter((id) => id !== event.id) })} /> {event.name}</label>)}</fieldset><button className="primary wideButton" onClick={assignReceiver}><UserPlus size={17} /> Tambah petugas</button><p className="statusMessage">{message}</p></aside></section></section></main>
+  return <main className="adminCmsShell"><AdminSidebar active="/admin/receivers" /><section className="workspace"><header className="topbar"><div><p className="eyebrow">Admin → Event → Petugas</p><h1>Petugas event</h1><span>Akun dapat bertugas di banyak event tanpa mengubah role pemilik event.</span></div></header><section className="mainGrid"><article className="adminPanel"><div className="sectionHeader"><div><p className="eyebrow">Assignments</p><h2>Daftar petugas</h2></div><button onClick={() => selectedEventId && loadReceivers(selectedEventId)}><RefreshCw size={17} /> Refresh</button></div><div className="receiverAssignmentList">{receivers.map((receiver) => <article key={receiver.user_id}><div><strong>{receiver.name}</strong><small>{receiver.email}</small></div><span>{receiver.account_role}</span><span>{receiver.account_status}</span><span>{receiver.assignment_status}</span><div className="inlineActions">{receiver.activation_required && <button onClick={() => resendActivation(receiver)}>Resend aktivasi</button>} {receiver.assignment_status === 'ACTIVE' && <button onClick={() => revoke(receiver)}>Cabut akses</button>}</div></article>)}{receivers.length === 0 && <p>Belum ada petugas untuk event ini.</p>}</div></article><aside className="adminPanel"><p className="eyebrow">Invite / assign</p><h2>Tambah petugas</h2><label>Nama (wajib untuk akun baru)<input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label><label>Email<input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></label><fieldset className="eventChecklist"><legend>Tugaskan ke event milik Anda</legend>{events.map((event) => <label key={event.id}><input type="checkbox" checked={form.eventIds.includes(event.id)} onChange={(e) => setForm({ ...form, eventIds: e.target.checked ? [...form.eventIds, event.id] : form.eventIds.filter((id) => id !== event.id) })} /> {event.name}</label>)}</fieldset><button className="primary wideButton" onClick={assignReceiver}><UserPlus size={17} /> Tambah petugas</button><p className="statusMessage">{message}</p></aside></section></section></main>
 }
 
 function AdminCmsApp() {
+  const pageMode = window.location.pathname.startsWith('/admin/events') ? 'events' : window.location.pathname.startsWith('/admin/guests') ? 'guests' : 'overview'
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [token, setToken] = useState(() => window.localStorage.getItem('guestory_admin_token') ?? '')
   const [events, setEvents] = useState<AdminEventLite[]>([])
-  const [selectedEventId, setSelectedEventId] = useState<number | null>(null)
+  const [selectedEventId, setSelectedEventId] = useSelectedEventId()
   const [dashboard, setDashboard] = useState<AdminDashboard | null>(null)
   const [guests, setGuests] = useState<AdminGuest[]>([])
   const [guestSearch, setGuestSearch] = useState('')
@@ -1040,12 +1061,16 @@ function AdminCmsApp() {
   async function generateInvitation(guestId: number) {
     if (!selectedEventId) return
 
+    setMessage('Membuat invitation…')
     try {
       const json = await adminFetch<{ invitation: { url: string } }>(`/admin/events/${selectedEventId}/guests/${guestId}/invitation/generate`, {
         method: 'POST',
       })
       setMessage(`Invitation siap: ${json.invitation.url}`)
-      if (json.invitation.url) window.open(json.invitation.url, '_blank', 'noopener,noreferrer')
+      if (json.invitation.url) {
+        const popup = window.open(json.invitation.url, '_blank', 'noopener,noreferrer')
+        if (!popup) setMessage(`Invitation berhasil dibuat. Popup diblokir browser; buka link: ${json.invitation.url}`)
+      }
       await loadEventWorkspace()
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Generate invitation gagal.')
@@ -1055,6 +1080,8 @@ function AdminCmsApp() {
   async function generateQr(guestId: number, regenerate = false) {
     if (!selectedEventId) return
 
+    if (regenerate && !window.confirm('Regenerasi akan mencabut QR lama. Lanjutkan?')) return
+    setMessage(regenerate ? 'Mencabut QR lama dan membuat QR baru…' : 'Membuat QR…')
     try {
       await adminFetch(`/admin/events/${selectedEventId}/guests/${guestId}/qr/${regenerate ? 'regenerate' : 'generate'}`, {
         method: 'POST',
@@ -1083,8 +1110,11 @@ function AdminCmsApp() {
     const link = document.createElement('a')
     link.href = url
     link.download = `guestory-${guest.guest_code}.svg`
+    document.body.appendChild(link)
     link.click()
-    window.URL.revokeObjectURL(url)
+    link.remove()
+    window.setTimeout(() => window.URL.revokeObjectURL(url), 0)
+    setMessage(`QR ${guest.name} berhasil diunduh.`)
   }
 
   function logoutAdmin() {
@@ -1147,7 +1177,7 @@ function AdminCmsApp() {
 
   return (
     <main className="adminCmsShell">
-      <AdminSidebar active="/admin" />
+      <AdminSidebar active={pageMode === 'overview' ? '/admin' : `/admin/${pageMode}`} />
 
       <section className="workspace">
         <header className="topbar">
@@ -1157,13 +1187,7 @@ function AdminCmsApp() {
             <span>{selectedEvent?.status ?? 'Event'} · {selectedEvent?.date ? formatDate(selectedEvent.date) : 'Pilih event'}</span>
           </div>
           <div className="headerActions">
-            <select value={selectedEventId ?? ''} onChange={(event) => setSelectedEventId(Number(event.target.value))}>
-              {events.map((event) => (
-                <option key={event.id} value={event.id}>
-                  {event.name}
-                </option>
-              ))}
-            </select>
+
             <button type="button" onClick={() => loadEventWorkspace()}>
               <RefreshCw size={18} />
               Refresh
@@ -1210,7 +1234,7 @@ function AdminCmsApp() {
             <button className="primary" type="button" onClick={() => openGuestForm()}><UserPlus size={17} /> Add Guest</button>
 
             <div className="cmsGuestList">
-              {guests.map((guest) => (
+              {(pageMode === 'overview' ? guests.slice(0, 5) : guests).map((guest) => (
                 <article key={guest.id}>
                   <div>
                     <strong>{guest.name}</strong>
@@ -1239,10 +1263,12 @@ function AdminCmsApp() {
                 </article>
               ))}
               {guests.length === 0 ? <p>Belum ada tamu untuk filter ini.</p> : null}
+              {pageMode === 'overview' && guests.length > 5 ? <a className="textLink" href="/admin/guests">Lihat dan kelola semua tamu</a> : null}
             </div>
           </div>
 
           <aside className="cmsSidePanel">
+            <section className="adminPanel"><div className="sectionHeader"><div><p className="eyebrow">{pageMode === 'overview' ? 'Latest Events' : 'Events'}</p><h2>{pageMode === 'overview' ? 'Event terbaru' : 'Semua event'}</h2></div></div><div className="historyList">{(pageMode === 'overview' ? events.slice(0, 3) : events).map((event) => <button type="button" key={event.id} onClick={() => setSelectedEventId(event.id)}><strong>{event.name}</strong><span>{event.status} · {event.date ? formatDate(event.date) : 'Tanggal belum diatur'}</span></button>)}</div>{pageMode === 'overview' && events.length > 3 ? <a className="textLink" href="/admin/events">Lihat dan kelola semua event</a> : null}</section>
             <section className="adminPanel">
               <div className="sectionHeader">
                 <div>
@@ -1339,7 +1365,7 @@ type EventBilling = {
 function AdminBillingPage() {
   const [token, setToken] = useState(() => window.localStorage.getItem('guestory_admin_token') ?? '')
   const [events, setEvents] = useState<AdminEventLite[]>([])
-  const [selectedEventId, setSelectedEventId] = useState<number | null>(null)
+  const [selectedEventId, setSelectedEventId] = useSelectedEventId()
   const [plans, setPlans] = useState<BillingPlan[]>([])
   const [billing, setBilling] = useState<EventBilling | null>(null)
   const [message, setMessage] = useState('Pilih event dan paket untuk mengaktifkan entitlement.')
@@ -1430,7 +1456,7 @@ function AdminBillingPage() {
     <main className="adminCmsShell">
       <AdminSidebar active="/admin/billing" />
       <section className="workspace">
-        <header className="topbar"><div><p className="eyebrow">Per-event Billing</p><h1>{selectedEvent?.name ?? 'Pilih event'}</h1><span>Plan dan pembayaran terpisah dari lifecycle event.</span></div><div className="headerActions"><select value={selectedEventId ?? ''} onChange={(event) => setSelectedEventId(Number(event.target.value))}>{events.map((event) => <option key={event.id} value={event.id}>{event.name}</option>)}</select><button type="button" onClick={syncStatus} disabled={!billing?.order_id || busy}><RefreshCw size={17} /> Sync status</button></div></header>
+        <header className="topbar"><div><p className="eyebrow">Per-event Billing</p><h1>{selectedEvent?.name ?? 'Pilih event'}</h1><span>Plan dan pembayaran terpisah dari lifecycle event.</span></div><div className="headerActions"><button type="button" onClick={syncStatus} disabled={!billing?.order_id || busy}><RefreshCw size={17} /> Sync status</button></div></header>
         <section className="billingStatus adminPanel"><div><p className="eyebrow">Current entitlement</p><h2>{billing ? `${billing.plan_code} · ${billing.status}` : 'Belum ada paket'}</h2></div>{billing?.order_id ? <span>Order {billing.order_id}</span> : null}</section>
         <section className="billingPlans">
           {plans.map((plan) => <article className={`billingPlan ${plan.popular ? 'popular' : ''}`} key={plan.code}>{plan.popular ? <span className="popularBadge">POPULAR</span> : null}<p className="eyebrow">{plan.name}</p><h2>{plan.amount === 0 ? 'Rp0' : `Rp${plan.amount.toLocaleString('id-ID')}`}<small>/event</small></h2><ul><li>{plan.guest_limit.toLocaleString('id-ID')} guests</li><li>{plan.photo_limit.toLocaleString('id-ID')} photos</li><li>Retention {plan.retention_days} hari</li><li>{plan.zip_download ? 'ZIP download' : 'Single-photo download'}</li><li>{plan.google_photos ? 'Google Photos entitlement' : 'Tanpa Google Photos'}</li><li>{plan.staff_limit} staff</li><li>{plan.branding === 'NONE' ? 'Tanpa branding' : plan.branding === 'SMALL' ? 'Small branding' : 'Guestory branded'}</li></ul><button className="primary wideButton" type="button" disabled={!selectedEventId || busy || (billing?.plan_code === plan.code && ['ACTIVE', 'PAID'].includes(billing.status))} onClick={() => selectPlan(plan)}>{billing?.plan_code === plan.code && ['ACTIVE', 'PAID'].includes(billing.status) ? 'Paket aktif' : plan.code === 'FREE' ? 'Aktifkan FREE' : `Pilih ${plan.name}`}</button></article>)}
@@ -1446,7 +1472,7 @@ function AdminAttendancePage() {
   const [password, setPassword] = useState('')
   const [token, setToken] = useState(() => window.localStorage.getItem('guestory_admin_token') ?? '')
   const [events, setEvents] = useState<AdminEventLite[]>([])
-  const [selectedEventId, setSelectedEventId] = useState<number | null>(null)
+  const [selectedEventId, setSelectedEventId] = useSelectedEventId()
   const [attendance, setAttendance] = useState<AttendanceRow[]>([])
   const [guestBook, setGuestBook] = useState<GuestBookRow[]>([])
   const [statusFilter, setStatusFilter] = useState('')
@@ -1608,11 +1634,7 @@ function AdminAttendancePage() {
       <section className="attendanceToolbar">
         <label>
           Event
-          <select value={selectedEventId ?? ''} onChange={(event) => setSelectedEventId(Number(event.target.value))}>
-            {events.map((event) => (
-              <option key={event.id} value={event.id}>{event.name}</option>
-            ))}
-          </select>
+
         </label>
         <label>
           Attendance
@@ -1683,7 +1705,7 @@ function AdminWhatsAppPage() {
   const [events, setEvents] = useState<AdminEventLite[]>([])
   const [guests, setGuests] = useState<AdminGuestLite[]>([])
   const [logs, setLogs] = useState<WhatsAppLog[]>([])
-  const [selectedEventId, setSelectedEventId] = useState<number | null>(null)
+  const [selectedEventId, setSelectedEventId] = useSelectedEventId()
   const [selectedGuestId, setSelectedGuestId] = useState<number | null>(null)
   const [message, setMessage] = useState('Login admin untuk kirim undangan WhatsApp.')
 
@@ -1847,16 +1869,6 @@ function AdminWhatsAppPage() {
 
       <section className="attendanceControls">
         <label>
-          Event
-          <select value={selectedEventId ?? ''} onChange={(event) => setSelectedEventId(Number(event.target.value))}>
-            {events.map((event) => (
-              <option key={event.id} value={event.id}>
-                {event.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
           Guest
           <select value={selectedGuestId ?? ''} onChange={(event) => setSelectedGuestId(Number(event.target.value))}>
             {guests.map((guest) => (
@@ -1907,7 +1919,7 @@ function AdminPhotosPage() {
   const [password, setPassword] = useState('')
   const [token, setToken] = useState(() => window.localStorage.getItem('guestory_admin_token') ?? '')
   const [events, setEvents] = useState<AdminEventLite[]>([])
-  const [selectedEventId, setSelectedEventId] = useState<number | null>(null)
+  const [selectedEventId, setSelectedEventId] = useSelectedEventId()
   const [photos, setPhotos] = useState<AdminPhoto[]>([])
   const [summary, setSummary] = useState<PhotoSummary>({ total: 0, pending: 0, approved: 0, rejected: 0 })
   const [statusFilter, setStatusFilter] = useState('')
@@ -2048,16 +2060,6 @@ function AdminPhotosPage() {
 
       <section className="attendanceControls">
         <label>
-          Event
-          <select value={selectedEventId ?? ''} onChange={(event) => setSelectedEventId(Number(event.target.value))}>
-            {events.map((event) => (
-              <option key={event.id} value={event.id}>
-                {event.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
           Status
           <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
             <option value="">Semua foto</option>
@@ -2129,7 +2131,7 @@ function ReceiverCheckInApp() {
   const [password, setPassword] = useState('')
   const [token, setToken] = useState(() => window.localStorage.getItem('guestory_receiver_token') ?? '')
   const [events, setEvents] = useState<ReceiverEvent[]>([])
-  const [selectedEventId, setSelectedEventId] = useState<number | null>(null)
+  const [selectedEventId, setSelectedEventId] = useSelectedEventId()
   const [scanToken, setScanToken] = useState('demo-qr-budi')
   const [validation, setValidation] = useState<ValidationResult | null>(null)
   const [actualGuestCount, setActualGuestCount] = useState(1)
@@ -2138,6 +2140,8 @@ function ReceiverCheckInApp() {
   const [searchResults, setSearchResults] = useState<ReceiverGuest[]>([])
   const [message, setMessage] = useState('Login receiver untuk mulai check-in.')
   const [scannerActive, setScannerActive] = useState(false)
+  const [validating, setValidating] = useState(false)
+  const [scannerError, setScannerError] = useState('')
 
   const selectedEvent = events.find((event) => event.id === selectedEventId)
 
@@ -2212,8 +2216,10 @@ function ReceiverCheckInApp() {
     if (!selectedEventId) return
 
     const parsedToken = extractQrToken(rawValue)
+    if (!parsedToken) { setValidation(null); setMessage('Masukkan token atau URL QR yang valid.'); return }
     setScanToken(parsedToken)
     setMessage('Memvalidasi QR...')
+    setValidating(true)
 
     try {
       const json = await requestApi<ValidationResult>(`/receiver/events/${selectedEventId}/check-in/validate`, {
@@ -2226,7 +2232,7 @@ function ReceiverCheckInApp() {
     } catch (error) {
       setValidation(null)
       setMessage(error instanceof Error ? error.message : 'QR Code tidak valid.')
-    }
+    } finally { setValidating(false) }
   }
 
   async function confirmQrCheckIn() {
@@ -2374,13 +2380,14 @@ function ReceiverCheckInApp() {
           </button>
         </div>
 
-        {scannerActive ? <QrCameraScanner onScan={validateToken} /> : null}
+        {scannerActive ? <QrCameraScanner onScan={validateToken} onError={(error) => { setScannerError(error); setMessage(error) }} /> : null}
+        {scannerError ? <p className="statusMessage" role="alert">{scannerError}</p> : null}
 
         <div className="manualToken">
           <input value={scanToken} onChange={(event) => setScanToken(event.target.value)} placeholder="Paste token atau URL QR" />
-          <button className="primary" type="button" onClick={() => validateToken()}>
+          <button className="primary" type="button" disabled={validating || !scanToken.trim() || !selectedEventId} onClick={() => validateToken()}>
             <QrCode size={18} />
-            Validate
+            {validating ? 'Validating…' : 'Validate'}
           </button>
         </div>
 
@@ -2453,7 +2460,11 @@ function ReceiverCheckInApp() {
   )
 }
 
-function QrCameraScanner({ onScan }: { onScan: (token: string) => void }) {
+function QrCameraScanner({ onScan, onError }: { onScan: (token: string) => void; onError: (message: string) => void }) {
+  const onScanRef = useRef(onScan)
+  const onErrorRef = useRef(onError)
+  onScanRef.current = onScan
+  onErrorRef.current = onError
   useEffect(() => {
     let scanner: Html5QrcodeInstance | null = null
     let running = true
@@ -2472,21 +2483,23 @@ function QrCameraScanner({ onScan }: { onScan: (token: string) => void }) {
           (decodedText: string) => {
             if (!running || !scanner) return
             running = false
-            onScan(decodedText)
+            onScanRef.current(decodedText)
             scanner.stop().catch(() => undefined)
           },
           () => undefined,
         )
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         running = false
+        const name = error instanceof DOMException ? error.name : ''
+        onErrorRef.current(name === 'NotAllowedError' ? 'Izin kamera ditolak. Izinkan akses kamera di browser lalu coba lagi.' : name === 'NotFoundError' ? 'Kamera tidak ditemukan di perangkat ini.' : 'Scanner kamera gagal dimulai. Pastikan halaman memakai HTTPS dan kamera tidak dipakai aplikasi lain.')
       })
 
     return () => {
       running = false
       scanner?.stop().catch(() => undefined)
     }
-  }, [onScan])
+  }, [])
 
   return <div className="qrReader" id="guestory-qr-reader" />
 }
@@ -2784,11 +2797,11 @@ function extractQrToken(value: string) {
 
   try {
     const url = new URL(trimmed)
-    const match = url.pathname.match(/\/(?:api\/)?g\/([^/]+)/)
-
-    if (match?.[1]) {
-      return decodeURIComponent(match[1])
-    }
+    const queryToken = url.searchParams.get('token')
+    const segments = url.pathname.split('/').filter(Boolean)
+    const marker = segments.findIndex((segment) => ['g', 'invite', 'qr'].includes(segment.toLowerCase()))
+    const pathToken = marker >= 0 ? segments[marker + 1] : undefined
+    if (queryToken || pathToken) return decodeURIComponent(queryToken || pathToken || '')
   } catch {
     // Plain token input is expected for manual fallback and local testing.
   }
