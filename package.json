@@ -1,0 +1,17 @@
+{
+  "name": "guestory",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Guestory - Every Guest Has a Story",
+  "scripts": {
+    "dev:web": "npm --prefix apps/web run dev -- --host 0.0.0.0",
+    "preview:web": "npm --prefix apps/web run preview -- --host 0.0.0.0 --port 5177",
+    "build:web": "npm --prefix apps/web run build",
+    "lint:web": "npm --prefix apps/web run lint",
+    "api": "php apps/api/artisan serve --host=0.0.0.0 --port=8088",
+    "test:api": "cd apps/api && php artisan test",
+    "format:api": "cd apps/api && vendor/bin/pint --dirty",
+    "prod:build": "npm run build:web && cd apps/api && php artisan config:cache && php artisan view:cache",
+    "prod:clear": "cd apps/api && php artisan optimize:clear"
+  }
+}

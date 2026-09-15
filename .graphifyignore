@@ -1,0 +1,7 @@
+apps/api/vendor/
+apps/api/storage/
+apps/api/bootstrap/cache/
+apps/api/database/database.sqlite
+apps/web/node_modules/
+apps/web/dist/
+apps/web/src/assets/

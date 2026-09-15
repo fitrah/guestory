@@ -1,0 +1,85 @@
+export const guestoryMvpDevelopmentPlan = {
+  product: {
+    name: 'Guestory',
+    tagline: 'Every Guest Has a Story',
+    coreConcept: 'One event, one guest, one unique QR identity, one connected guest experience',
+  },
+  completedBaseline: [
+    'Laravel API scaffold',
+    'React Vite frontend scaffold',
+    'PostgreSQL database',
+    'Core data model migrations',
+    'Demo seed data',
+    'Database-backed invitation, dashboard, QR validation, and check-in APIs',
+    'Feature tests for invitation and QR check-in rules',
+    'PM2 process config',
+  ],
+  milestones: [
+    {
+      key: 'auth_role_access',
+      label: 'Auth And Role Access',
+      modules: ['admin_login', 'receiver_login', 'role_middleware', 'assigned_event_guard'],
+      status: 'completed',
+    },
+    {
+      key: 'admin_event_management',
+      label: 'Admin Event Management',
+      modules: ['event_crud', 'event_status_transitions', 'owner_scoping', 'event_dashboard'],
+      status: 'completed',
+    },
+    {
+      key: 'admin_guest_management',
+      label: 'Admin Guest Management',
+      modules: ['guest_crud', 'guest_import', 'guest_export', 'guest_search_filters', 'guest_detail'],
+      status: 'completed',
+    },
+    {
+      key: 'invitation_qr_management',
+      label: 'Invitation And QR Management',
+      modules: ['invitation_token_generation', 'qr_token_generation', 'qr_revoke', 'qr_regenerate', 'qr_download'],
+      status: 'completed',
+    },
+    {
+      key: 'guest_invitation_experience',
+      label: 'Guest Invitation Experience',
+      modules: ['invite_route', 'personalized_invitation', 'rsvp', 'personal_qr_display', 'guest_album_access'],
+      status: 'completed',
+    },
+    {
+      key: 'receiver_check_in_app',
+      label: 'Receiver Check-In App',
+      modules: ['camera_scanner', 'manual_guest_search', 'manual_check_in', 'recent_check_ins', 'duplicate_state'],
+      status: 'completed',
+    },
+    {
+      key: 'attendance_guest_book',
+      label: 'Attendance And Digital Guest Book',
+      modules: ['attendance_list', 'guest_book_from_check_ins', 'filters_sorting', 'attendance_export'],
+      status: 'completed',
+    },
+    {
+      key: 'photo_upload_album',
+      label: 'Photo Upload And Album',
+      modules: ['local_photo_storage', 'guest_photo_upload', 'album_view', 'admin_photo_management', 'photo_moderation_basic'],
+      status: 'completed',
+    },
+    {
+      key: 'wapi_automation',
+      label: 'WhatsApp Automation Via WAPI',
+      modules: ['wapi_client', 'send_invitation', 'resend_invitation', 'bulk_send', 'delivery_log'],
+      status: 'completed',
+    },
+    {
+      key: 'frontend_api_ux_completion',
+      label: 'Frontend API Integration And UX Completion',
+      modules: ['admin_api_dashboard', 'event_create_status_controls', 'guest_create_search', 'invitation_qr_actions', 'responsive_qa'],
+      status: 'completed',
+    },
+    {
+      key: 'production_readiness',
+      label: 'Production Readiness',
+      modules: ['pm2_runtime', 'nginx_proxy', 'storage_serving', 'rate_limits', 'health_checks', 'deploy_runbook'],
+      status: 'completed',
+    },
+  ],
+} as const;

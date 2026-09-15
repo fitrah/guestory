@@ -1,0 +1,33 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# Dependencies and generated builds
+node_modules/
+vendor/
+dist/
+public/build/
+public/storage
+
+# Runtime and local data
+*.log
+*.sqlite
+*.sqlite3
+.phpunit.result.cache
+.phpunit.cache/
+storage/framework/cache/data/*
+storage/framework/sessions/*
+storage/framework/views/*
+
+# Analysis/build sidecars
+graphify-out/
+
+# Editors and OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
