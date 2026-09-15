@@ -8,6 +8,7 @@ import {
   CreditCard,
   Download,
   LayoutDashboard,
+  LifeBuoy,
   LogIn,
   Menu,
   QrCode,
@@ -28,6 +29,7 @@ import './App.css'
 import { useSelectedEventId } from './eventSelection'
 import './invitation-builder.css'
 import { InvitationBuilderPage, InvitationRenderer, type AlbumMeta, type InvitationConfig } from './InvitationBuilder'
+import { AdminHelpPage, ReceiverHelpPage } from './UserGuide'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? '/api'
 
@@ -268,6 +270,7 @@ function AdminSidebar({ active }: { active: string }) {
       { href: '/admin/whatsapp', label: 'WhatsApp', Icon: Send },
       { href: '/admin/billing', label: 'Plan & Billing', Icon: CreditCard },
       { href: '/admin/settings', label: 'Settings', Icon: Settings },
+      { href: '/admin/help', label: 'Help & User Guide', Icon: LifeBuoy },
     ] },
   ]
 
@@ -396,6 +399,10 @@ function App() {
     return <InvitationBuilderPage apiBase={API_BASE} Sidebar={AdminSidebar} />
   }
 
+  if (window.location.pathname.startsWith('/admin/help')) {
+    return <AdminHelpPage apiBase={API_BASE} Sidebar={AdminSidebar} />
+  }
+
   if (window.location.pathname.startsWith('/admin/attendance')) {
     return <AdminAttendancePage />
   }
@@ -430,6 +437,10 @@ function App() {
 
   if (window.location.pathname.startsWith('/admin')) {
     return <AdminCmsApp />
+  }
+
+  if (window.location.pathname.startsWith('/receiver/help')) {
+    return <ReceiverHelpPage apiBase={API_BASE} />
   }
 
   if (window.location.pathname.startsWith('/receiver')) {
@@ -2340,9 +2351,10 @@ function ReceiverCheckInApp() {
           <h1>{selectedEvent?.name ?? 'Pilih Event'}</h1>
           <span>{selectedEvent?.venue_name ?? 'Venue event'}</span>
         </div>
-        <button type="button" onClick={logoutReceiver}>
-          Logout
-        </button>
+        <div className="receiverHeaderActions">
+          <a href="/receiver/help"><LifeBuoy size={18} /> Panduan</a>
+          <button type="button" onClick={logoutReceiver}>Logout</button>
+        </div>
       </header>
 
       <section className="receiverStatus">
