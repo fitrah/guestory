@@ -69,9 +69,13 @@ npm run build:web
 
 ## Dokumentasi
 
+- [Panduan pengguna lengkap (SUPERADMIN, Admin Event, dan Receiver)](docs/user-guide.md)
 - [Invitation Builder](docs/invitation-builder.md)
 - [Account registration](docs/account-registration.md)
 - [Event receiver management](docs/event-receiver-management.md)
+- [Approved guest photo album](docs/guest-photo-album.md)
+- [Admin UI revamp](docs/admin-ui-revamp.md)
+- [Testing resolution](docs/testing-resolution.md)
 - [Production readiness](docs/production-readiness.md)
 - [Domain setup](docs/domain-setup.md)
 
