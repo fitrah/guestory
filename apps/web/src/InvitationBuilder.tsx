@@ -1,4 +1,4 @@
-import { CalendarDays, CameraOff, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, GripVertical, ImagePlus, MapPin, Pause, Play, QrCode, Save, Smartphone, Star, Trash2, Upload } from 'lucide-react'
+import { CalendarDays, Camera, CameraOff, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, GripVertical, ImagePlus, Images, MapPin, Pause, Play, QrCode, Save, Smartphone, Star, Trash2, Upload } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react'
 import { useSelectedEventId } from './eventSelection'
 
@@ -31,8 +31,14 @@ type RendererProps = {
   invite: RenderInvitation; config?: InvitationConfig; preview?: boolean; qrUrl?: string
   photos?: AlbumPhoto[]; slideshowAssets?: SlideshowAsset[]
   albumMeta?: AlbumMeta; albumLoading?: boolean; albumError?: string; onAlbumPageChange?: (page: number) => void
-  message?: string; selectedPhotoName?: string; photoUploading?: boolean; onRsvp?: (status: 'ATTENDING' | 'DECLINED') => void
-  onPhotoSelect?: (file: File | null) => void; onPhotoUpload?: () => void; assetUrl?: (value: string) => string
+  message?: string; selectedPhotoName?: string; selectedPhotoPreview?: string; photoUploading?: boolean; photoCanUpload?: boolean; onRsvp?: (status: 'ATTENDING' | 'DECLINED') => void
+  onPhotoSelect?: (file: File | null, source: 'camera' | 'gallery') => void; onPhotoUpload?: () => void; assetUrl?: (value: string) => string
+}
+
+// oxlint-disable-next-line react/only-export-components -- exported for input-semantics regression tests.
+export const guestPhotoInputSemantics = {
+  camera: { accept: 'image/*', capture: 'environment' as const },
+  gallery: { accept: 'image/*' },
 }
 
 const defaultInvitationConfig = (eventName = 'Your celebration'): InvitationConfig => ({
@@ -117,7 +123,7 @@ function GuestPhotoAlbum({ photos, meta, loading = false, error, assetUrl, onPag
   </div>
 }
 
-export function InvitationRenderer({ invite, config, preview = false, qrUrl, photos = [], slideshowAssets, albumMeta, albumLoading, albumError, onAlbumPageChange, message, selectedPhotoName, photoUploading = false, onRsvp, onPhotoSelect, onPhotoUpload, assetUrl = (value) => value }: RendererProps) {
+export function InvitationRenderer({ invite, config, preview = false, qrUrl, photos = [], slideshowAssets, albumMeta, albumLoading, albumError, onAlbumPageChange, message, selectedPhotoName, selectedPhotoPreview, photoUploading = false, photoCanUpload = true, onRsvp, onPhotoSelect, onPhotoUpload, assetUrl = (value) => value }: RendererProps) {
   const resolved = normalizeConfig(config ?? invite.invitation_config, invite.event.name)
   const enabled = [...resolved.sections].filter((section) => section.enabled).sort((a, b) => a.order - b.order)
   const c = resolved.content
@@ -127,7 +133,7 @@ export function InvitationRenderer({ invite, config, preview = false, qrUrl, pho
     if (id === 'slideshow') { const assets = slideshowAssets ?? invite.slideshow_assets ?? []; return <Slideshow key={`${id}-${assets.map(({ id: assetId }) => assetId).join('-')}`} assets={assets} heading={c.slideshow_heading} copy={c.slideshow_message} assetUrl={assetUrl} /> }
     if (id === 'qr') return <section className="ibSection ibQr" key={id}><div><p className="ibKicker">{c.qr_heading}</p><h2>{invite.guest.name}</h2><p>{invite.guest.guest_count} tamu dalam undangan ini</p></div>{qrUrl ? <img alt={`QR untuk ${invite.guest.name}`} src={qrUrl} /> : <div className="ibQrPlaceholder"><QrCode /></div>}<small>{c.qr_message}</small></section>
     if (id === 'rsvp') return <section className="ibSection ibRsvp" key={id}><p className="ibKicker">{c.rsvp_heading}</p><h2>{rsvpLabel(invite.guest.rsvp_status)}</h2><div><button type="button" disabled={preview} onClick={() => onRsvp?.('ATTENDING')}><CheckCircle2 /> Hadir</button><button type="button" disabled={preview} onClick={() => onRsvp?.('DECLINED')}>Tidak hadir</button></div>{message ? <p className="ibStatus">{message}</p> : null}</section>
-    return <section className="ibSection ibPhotos" id="guest-photo-album" key={id}><p className="ibKicker">Photos &amp; Album</p><h2>{c.photos_heading}</h2><p>{c.photos_message}</p>{!preview && <div className="ibUpload" aria-busy={photoUploading}><input aria-label="Pilih foto" accept="image/jpeg,image/png,image/webp" type="file" disabled={photoUploading} onChange={(event) => onPhotoSelect?.(event.target.files?.[0] ?? null)} /><button type="button" disabled={photoUploading || !selectedPhotoName} onClick={onPhotoUpload}>{photoUploading ? <span className="ibUploadSpinner" aria-hidden="true" /> : <Upload />} {photoUploading ? 'Mengupload…' : 'Upload foto'}</button><small aria-live="polite">{photoUploading ? 'Foto sedang dikirim. Jangan tutup halaman ini.' : selectedPhotoName || 'JPG, PNG, atau WebP maksimal 5 MB.'}</small></div>}<GuestPhotoAlbum photos={photos} meta={albumMeta} loading={albumLoading} error={albumError} assetUrl={assetUrl} onPageChange={onAlbumPageChange} /></section>
+    return <section className="ibSection ibPhotos" id="guest-photo-album" key={id}><p className="ibKicker">Photos &amp; Album</p><h2>{c.photos_heading}</h2><p>{c.photos_message}</p>{!preview && <div className="ibUpload" aria-busy={photoUploading}>{photoCanUpload ? <><div className="ibUploadChoices"><label><Camera /><strong>Ambil Foto</strong><span>Kamera belakang bila didukung perangkat.</span><input aria-label="Ambil Foto" type="file" accept={guestPhotoInputSemantics.camera.accept} capture={guestPhotoInputSemantics.camera.capture} disabled={photoUploading} onChange={(event) => { onPhotoSelect?.(event.target.files?.[0] ?? null, 'camera'); event.currentTarget.value = '' }} /></label><label><Images /><strong>Pilih dari Galeri</strong><span>Gunakan foto yang sudah tersimpan.</span><input aria-label="Pilih dari Galeri" type="file" accept={guestPhotoInputSemantics.gallery.accept} disabled={photoUploading} onChange={(event) => { onPhotoSelect?.(event.target.files?.[0] ?? null, 'gallery'); event.currentTarget.value = '' }} /></label></div>{selectedPhotoPreview && <figure className="ibUploadPreview"><img src={selectedPhotoPreview} alt="Preview foto yang akan diupload" /><figcaption>{selectedPhotoName}</figcaption></figure>}<button type="button" disabled={photoUploading || !selectedPhotoName} onClick={onPhotoUpload}>{photoUploading ? <span className="ibUploadSpinner" aria-hidden="true" /> : <Upload />} {photoUploading ? 'Mengupload…' : 'Upload foto'}</button><small aria-live="polite">{photoUploading ? 'Foto sedang dikirim. Jangan tutup halaman ini.' : selectedPhotoName || 'Jika kamera tidak tersedia atau izin ditolak, gunakan Pilih dari Galeri. JPG, PNG, atau WebP maksimal 5 MB.'}</small></> : <div className="ibUploadLocked" role="note"><CameraOff aria-hidden="true" /><div><strong>Check-in diperlukan untuk upload foto</strong><span>Album tetap dapat dilihat. Setelah check-in untuk event ini berhasil, buka ulang undangan untuk memakai kamera atau galeri.</span></div></div>}</div>}<GuestPhotoAlbum photos={photos} meta={albumMeta} loading={albumLoading} error={albumError} assetUrl={assetUrl} onPageChange={onAlbumPageChange} /></section>
   }
   return <article className={`invitationRenderer theme-${resolved.theme} ${preview ? 'isPreview' : ''}`}><div className="ibCanvas">{enabled.map(({ id }) => renderSection(id))}<footer>{c.closing_message}<small>Made with Guestory</small></footer></div></article>
 }

@@ -777,4 +777,13 @@ Panduan ini membedakan kemampuan backend dengan tombol yang benar-benar tersedia
 - [Catatan perbaikan UI dan QR](REVIEW_FIXES.md)
 - [Resolusi pengujian UI dan perangkat](testing-resolution.md)
 
+## Upload foto dari undangan
+
+- Album foto tetap dapat dilihat dari undangan selama undangan/event tersedia, sesuai aturan album yang sudah berlaku.
+- Tombol upload baru aktif setelah tamu pada undangan tersebut berhasil **check-in di event yang sama**. Check-in tamu atau event lain tidak berlaku.
+- Tamu walk-in yang dibuat melalui alur Receiver langsung memiliki check-in dan dapat upload dari invitation personalnya.
+- Gunakan **Ambil Foto** untuk membuka kamera belakang bila browser/perangkat mendukungnya, atau **Pilih dari Galeri** untuk memakai gambar tersimpan. Keduanya menampilkan preview sebelum tombol **Upload foto** dipilih.
+- Bila kamera tidak tersedia, izin ditolak, atau pengambilan dibatalkan, gunakan pilihan galeri. Guestory tidak menjalankan kamera terus-menerus.
+- Format yang diterima tetap JPG, PNG, atau WebP maksimal 5 MB. Foto masuk sebagai `PENDING` dan baru tampil di album setelah disetujui admin.
+
 Dokumen deployment seperti [Production readiness](production-readiness.md) dan [Domain setup](domain-setup.md) ditujukan kepada pengelola teknis, bukan pengguna akhir.

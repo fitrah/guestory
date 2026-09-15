@@ -10,6 +10,12 @@ The existing top-level `photos` array remains available for compatibility and no
 
 ## Public experience
 
+- Album viewing keeps the existing invitation/event rules and still returns only approved photos.
+- Upload authorization is stricter: the exact invitation guest must have a `check_ins` row scoped to the same event, and the invitation must still be `PUBLISHED`. A status flag on the guest record alone is not sufficient. This includes walk-in guests because their creation flow writes the invitation and same-event check-in atomically.
+- An unchecked or revoked invitation receives HTTP `403` with code `PHOTO_UPLOAD_CHECK_IN_REQUIRED`. Authorization runs before file validation/storage and before the photo transaction, so rejection creates no stored file and no `photos` row.
+- Checked-in guests get separate **Ambil Foto** and **Pilih dari Galeri** controls. The camera input uses `accept="image/*" capture="environment"`; the gallery input uses `accept="image/*"` without `capture`. Both preview the selected image and submit through the same `/photos` endpoint and validation pipeline.
+- Browsers may treat `capture` as a hint. If direct capture is unsupported, camera permission is denied, or capture is cancelled, the invitation explains the state and keeps the gallery fallback available. Guestory intentionally does not open a continuous WebRTC camera stream.
+
 - The guest-photo carousel shows up to eight approved photos from the **currently selected gallery page**. This intentionally repeats those records in a larger highlight format before the grid; it does not mix in invitation design images or make an extra unbounded request.
 - The carousel autoplays every five seconds when it has at least two photos. It wraps safely and provides explicit pause/resume, previous/next buttons, dots, a visible count, and Left/Right keyboard controls.
 - Hover, focus within the carousel, touch, and manual navigation pause or reset autoplay as appropriate. Zero/one-photo states never start a timer, and `prefers-reduced-motion: reduce` disables autoplay and visual transitions.
@@ -30,3 +36,5 @@ npm run build:web
 ```
 
 Focused API coverage is in `apps/api/tests/Feature/GuestInvitationExperienceTest.php` and covers approval filtering, pagination validation and out-of-range pages, deterministic ordering, and event isolation.
+
+Frontend regressions in `apps/web/src/guestPhotoUpload.test.ts` preserve the separate camera and gallery input semantics. `apps/web/src/UserGuide.test.ts` keeps the check-in prerequisite and choices documented.

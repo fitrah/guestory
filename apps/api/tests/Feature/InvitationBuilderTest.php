@@ -72,7 +72,8 @@ class InvitationBuilderTest extends TestCase
             ->assertOk()
             ->assertJsonPath('event.name', 'Andi & Sinta Wedding')
             ->assertJsonPath('guest.name', 'Budi Santoso')
-            ->assertJsonPath('photo_feature.can_upload', true)
+            ->assertJsonPath('photo_feature.can_upload', false)
+            ->assertJsonPath('photo_feature.requires_check_in', true)
             ->assertJsonPath('invitation_config.theme', 'classic')
             ->assertJsonPath('invitation_config.is_default', true);
     }

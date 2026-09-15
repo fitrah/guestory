@@ -1602,7 +1602,11 @@ Route::get('/invite/{token}', function (string $token) {
         ],
         'qr_svg_url' => url("/api/invite/{$invitation->token}/qr.svg"),
         'photo_feature' => [
-            'can_upload' => true,
+            'can_upload' => $invitation->status === 'PUBLISHED' && CheckIn::query()
+                ->where('event_id', $invitation->event_id)
+                ->where('guest_id', $invitation->guest_id)
+                ->exists(),
+            'requires_check_in' => true,
             'album_status' => 'APPROVED_ONLY',
         ],
         'invitation_config' => invitationConfigPayload($invitation->event),
@@ -1713,6 +1717,18 @@ Route::post('/invite/{token}/photos', function (Request $request, string $token,
 
     if (! $invitation instanceof Invitation) {
         return $invitation;
+    }
+
+    $hasEventCheckIn = CheckIn::query()
+        ->where('event_id', $invitation->event_id)
+        ->where('guest_id', $invitation->guest_id)
+        ->exists();
+
+    if ($invitation->status !== 'PUBLISHED' || ! $hasEventCheckIn) {
+        return response()->json([
+            'code' => 'PHOTO_UPLOAD_CHECK_IN_REQUIRED',
+            'message' => 'Upload foto hanya tersedia setelah tamu ini berhasil check-in untuk event tersebut.',
+        ], 403);
     }
 
     $data = $request->validate([

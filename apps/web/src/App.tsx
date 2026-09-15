@@ -61,6 +61,7 @@ type InvitePayload = {
   qr_svg_url: string
   invitation_config?: InvitationConfig
   slideshow_assets?: { id: number; url: string; order: number; is_cover: boolean }[]
+  photo_feature?: { can_upload: boolean; requires_check_in?: boolean; album_status: string }
 }
 
 type AlbumPhoto = {
@@ -2682,6 +2683,7 @@ function GuestInvitation({ token }: { token: string }) {
   const [albumLoading, setAlbumLoading] = useState(false)
   const [albumError, setAlbumError] = useState('')
   const [selectedPhoto, setSelectedPhoto] = useState<File | null>(null)
+  const [selectedPhotoPreview, setSelectedPhotoPreview] = useState('')
   const [photoUploading, setPhotoUploading] = useState(false)
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [message, setMessage] = useState('Memuat undangan...')
@@ -2724,6 +2726,29 @@ function GuestInvitation({ token }: { token: string }) {
       cancelled = true
     }
   }, [token])
+
+  useEffect(() => () => {
+    if (selectedPhotoPreview) URL.revokeObjectURL(selectedPhotoPreview)
+  }, [selectedPhotoPreview])
+
+  function selectPhoto(file: File | null, source: 'camera' | 'gallery') {
+    if (!file) {
+      setMessage(source === 'camera' ? 'Pengambilan foto dibatalkan atau kamera tidak tersedia. Gunakan galeri bila perlu.' : 'Pemilihan foto dibatalkan.')
+      return
+    }
+    if (!file.type.startsWith('image/')) {
+      setMessage('File harus berupa gambar JPG, PNG, atau WebP.')
+      return
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setMessage('Ukuran foto maksimal 5 MB.')
+      return
+    }
+    if (selectedPhotoPreview) URL.revokeObjectURL(selectedPhotoPreview)
+    setSelectedPhoto(file)
+    setSelectedPhotoPreview(URL.createObjectURL(file))
+    setMessage(source === 'camera' ? 'Preview foto dari kamera siap diupload.' : 'Preview foto dari galeri siap diupload.')
+  }
 
   async function loadAlbumPage(page: number) {
     const section = document.getElementById('guest-photo-album')
@@ -2794,11 +2819,16 @@ function GuestInvitation({ token }: { token: string }) {
       const json = await response.json()
 
       if (!response.ok) {
+        if (response.status === 403 && json.code === 'PHOTO_UPLOAD_CHECK_IN_REQUIRED') {
+          setInvite((current) => current ? { ...current, photo_feature: { ...(current.photo_feature ?? { album_status: 'APPROVED_ONLY' }), can_upload: false, requires_check_in: true } } : current)
+        }
         setMessage(json.message ?? 'Foto gagal diupload. Silakan coba lagi.')
         return
       }
 
       setSelectedPhoto(null)
+      if (selectedPhotoPreview) URL.revokeObjectURL(selectedPhotoPreview)
+      setSelectedPhotoPreview('')
       setMessage('Foto berhasil diupload dan menunggu persetujuan admin.')
     } catch {
       setMessage('Koneksi terputus saat upload. Silakan coba lagi.')
@@ -2825,7 +2855,7 @@ function GuestInvitation({ token }: { token: string }) {
     )
   }
 
-  return <main className="publicInvitationPage"><InvitationRenderer invite={invite} qrUrl={`${API_BASE}/invite/${token}/qr.svg`} photos={photos} slideshowAssets={invite.slideshow_assets ?? []} albumMeta={albumMeta} albumLoading={albumLoading} albumError={albumError} onAlbumPageChange={loadAlbumPage} message={message} selectedPhotoName={selectedPhoto?.name} photoUploading={photoUploading} onRsvp={updateRsvp} onPhotoSelect={setSelectedPhoto} onPhotoUpload={uploadPhoto} assetUrl={absoluteAssetUrl} /></main>
+  return <main className="publicInvitationPage"><InvitationRenderer invite={invite} qrUrl={`${API_BASE}/invite/${token}/qr.svg`} photos={photos} slideshowAssets={invite.slideshow_assets ?? []} albumMeta={albumMeta} albumLoading={albumLoading} albumError={albumError} onAlbumPageChange={loadAlbumPage} message={message} selectedPhotoName={selectedPhoto?.name} selectedPhotoPreview={selectedPhotoPreview} photoUploading={photoUploading} photoCanUpload={invite.photo_feature?.can_upload ?? false} onRsvp={updateRsvp} onPhotoSelect={selectPhoto} onPhotoUpload={uploadPhoto} assetUrl={absoluteAssetUrl} /></main>
 }
 
 function AdminPrototype() {

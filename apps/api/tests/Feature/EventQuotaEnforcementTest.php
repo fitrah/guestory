@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\CheckIn;
 use App\Models\Event;
 use App\Models\EventBilling;
 use App\Models\Guest;
@@ -109,6 +110,7 @@ class EventQuotaEnforcementTest extends TestCase
         $event = $this->event();
         $guest = $event->guests()->create(['guest_code' => 'PHOTO1', 'name' => 'Uploader']);
         $invitation = Invitation::create(['event_id' => $event->id, 'guest_id' => $guest->id, 'token' => 'quota-photo-token', 'status' => 'PUBLISHED', 'published_at' => now()]);
+        CheckIn::create(['event_id' => $event->id, 'guest_id' => $guest->id, 'receiver_id' => CheckIn::query()->value('receiver_id'), 'method' => 'MANUAL', 'actual_guest_count' => 1, 'checked_in_at' => now()]);
 
         return [$event, $invitation];
     }

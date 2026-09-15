@@ -2,8 +2,10 @@
 
 namespace Tests\Feature;
 
+use App\Models\CheckIn;
 use App\Models\Event;
 use App\Models\Guest;
+use App\Models\Invitation;
 use App\Models\Photo;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -118,12 +120,36 @@ class GuestInvitationExperienceTest extends TestCase
             ->assertJsonPath('meta.to', null);
     }
 
-    public function test_guest_can_upload_photo_from_invitation_token(): void
+    public function test_unchecked_guest_cannot_upload_and_leaves_no_file_or_database_artifact(): void
     {
         Storage::fake('public');
         $this->seed();
 
+        $guestId = Guest::where('guest_code', 'GUEST-001')->value('id');
+        $beforeCount = Photo::where('guest_id', $guestId)->count();
+        $beforeFiles = Storage::disk('public')->allFiles();
+
         $this->post('/api/invite/invite-demo-budi/photos', [
+            'photo' => UploadedFile::fake()->createWithContent(
+                'moment.png',
+                base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII='),
+            ),
+        ])
+            ->assertForbidden()
+            ->assertJsonPath('code', 'PHOTO_UPLOAD_CHECK_IN_REQUIRED');
+
+        $this->assertSame($beforeCount, Photo::where('guest_id', $guestId)->count());
+        $this->assertSame($beforeFiles, Storage::disk('public')->allFiles());
+    }
+
+    public function test_checked_in_guest_can_upload_photo_from_invitation_token(): void
+    {
+        Storage::fake('public');
+        $this->seed();
+
+        $guest = Guest::where('guest_code', 'GUEST-002')->firstOrFail();
+
+        $this->post('/api/invite/invite-demo-sinta/photos', [
             'photo' => UploadedFile::fake()->createWithContent(
                 'moment.png',
                 base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII='),
@@ -132,14 +158,70 @@ class GuestInvitationExperienceTest extends TestCase
             ->assertCreated()
             ->assertJsonPath('code', 'PHOTO_UPLOADED')
             ->assertJsonPath('photo.status', 'PENDING')
-            ->assertJsonPath('photo.guest_name', 'Budi Santoso');
+            ->assertJsonPath('photo.guest_name', 'Sinta Dewi');
 
-        $photo = Photo::where('status', 'PENDING')->firstOrFail();
+        $photo = Photo::where('guest_id', $guest->id)->where('status', 'PENDING')->firstOrFail();
         Storage::disk('public')->assertExists($photo->file_path);
 
-        $this->getJson('/api/invite/invite-demo-budi/album')
+        $this->getJson('/api/invite/invite-demo-sinta/album')
             ->assertOk()
             ->assertJsonCount(3, 'photos');
+    }
+
+    public function test_check_in_from_another_event_does_not_authorize_upload(): void
+    {
+        Storage::fake('public');
+        $this->seed();
+
+        $guest = Guest::where('guest_code', 'GUEST-001')->firstOrFail();
+        $otherEvent = Event::create(['owner_id' => $guest->event->owner_id, 'name' => 'Other Event', 'type' => 'Wedding', 'date' => now()->addMonth(), 'status' => 'Published']);
+        $receiverId = CheckIn::query()->value('receiver_id');
+        CheckIn::create(['event_id' => $otherEvent->id, 'guest_id' => $guest->id, 'receiver_id' => $receiverId, 'method' => 'MANUAL', 'actual_guest_count' => 1, 'checked_in_at' => now()]);
+        $beforeCount = Photo::where('guest_id', $guest->id)->count();
+        $beforeFiles = Storage::disk('public')->allFiles();
+
+        $this->post('/api/invite/invite-demo-budi/photos', [
+            'photo' => UploadedFile::fake()->createWithContent('cross-event.jpg', base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=')),
+        ])->assertForbidden()->assertJsonPath('code', 'PHOTO_UPLOAD_CHECK_IN_REQUIRED');
+
+        $this->assertSame($beforeCount, Photo::where('guest_id', $guest->id)->count());
+        $this->assertSame($beforeFiles, Storage::disk('public')->allFiles());
+    }
+
+    public function test_checked_in_walk_in_guest_can_upload_photo(): void
+    {
+        Storage::fake('public');
+        $this->seed();
+
+        $event = Event::where('name', 'Andi & Sinta Wedding')->firstOrFail();
+        $guest = Guest::create(['event_id' => $event->id, 'walk_in' => true, 'guest_code' => 'WALKIN-PHOTO', 'name' => 'Walk-in Photo', 'guest_count' => 1, 'rsvp_status' => 'ATTENDING', 'invitation_status' => 'OPENED', 'attendance_status' => 'CHECKED_IN']);
+        $invitation = Invitation::create(['event_id' => $event->id, 'guest_id' => $guest->id, 'token' => 'walk-in-photo-token', 'status' => 'PUBLISHED', 'published_at' => now()]);
+        CheckIn::create(['event_id' => $event->id, 'guest_id' => $guest->id, 'receiver_id' => CheckIn::query()->value('receiver_id'), 'method' => 'WALK_IN', 'actual_guest_count' => 1, 'checked_in_at' => now()]);
+
+        $this->post("/api/invite/{$invitation->token}/photos", [
+            'photo' => UploadedFile::fake()->createWithContent('walk-in.jpg', base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=')),
+        ])->assertCreated()->assertJsonPath('photo.guest_name', 'Walk-in Photo');
+
+        $photo = Photo::where('guest_id', $guest->id)->firstOrFail();
+        Storage::disk('public')->assertExists($photo->file_path);
+    }
+
+    public function test_revoked_invitation_cannot_upload_even_after_check_in(): void
+    {
+        Storage::fake('public');
+        $this->seed();
+
+        $invitation = Invitation::where('token', 'invite-demo-sinta')->firstOrFail();
+        $invitation->update(['status' => 'REVOKED']);
+
+        $beforeCount = Photo::where('guest_id', $invitation->guest_id)->count();
+        $beforeFiles = Storage::disk('public')->allFiles();
+        $this->post('/api/invite/invite-demo-sinta/photos', [
+            'photo' => UploadedFile::fake()->createWithContent('revoked.jpg', base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=')),
+        ])->assertForbidden()->assertJsonPath('code', 'PHOTO_UPLOAD_CHECK_IN_REQUIRED');
+
+        $this->assertSame($beforeCount, Photo::where('guest_id', $invitation->guest_id)->count());
+        $this->assertSame($beforeFiles, Storage::disk('public')->allFiles());
     }
 
     public function test_guest_photo_upload_requires_image_file(): void
@@ -147,7 +229,7 @@ class GuestInvitationExperienceTest extends TestCase
         Storage::fake('public');
         $this->seed();
 
-        $this->post('/api/invite/invite-demo-budi/photos', [
+        $this->post('/api/invite/invite-demo-sinta/photos', [
             'photo' => UploadedFile::fake()->create('notes.pdf', 20, 'application/pdf'),
         ])->assertUnprocessable();
     }

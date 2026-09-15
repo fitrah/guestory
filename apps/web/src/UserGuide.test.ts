@@ -17,3 +17,11 @@ describe('contact import user guide', () => {
     }
   })
 })
+
+describe('guest photo user guide', () => {
+  const text = sections.filter((section) => ['builder-photos', 'receiver-walk-in'].includes(section.id)).flatMap((section) => [section.title, section.summary, ...section.steps, ...(section.tips ?? [])]).join(' ')
+
+  it('documents same-event check-in and separate camera/gallery choices', () => {
+    for (const expected of ['setelah check-in', 'event yang sama', 'Ambil Foto', 'Pilih dari Galeri', 'Walk-in']) expect(text).toContain(expected)
+  })
+})
