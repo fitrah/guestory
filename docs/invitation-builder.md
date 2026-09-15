@@ -27,9 +27,17 @@ The PUT body contains `theme`, exactly six uniquely identified `sections` with u
 
 `GET /api/invite/{token}` adds `invitation_config` to the existing response. Existing keys, RSVP, personal QR, album, and upload endpoints are unchanged. Events without a saved row receive a complete Classic default generated from event data, preserving invitations created before this migration.
 
+## Invitation link security
+
+- Real invitation creation uses an opaque, case-sensitive 48-character `Str::random()` token. Tokens do not contain sequential invitation IDs, guest IDs, event IDs, or guest codes.
+- `invitations.token` has a database unique index in the original `2026_09_11_034914_create_invitations_table.php` migration. Creation and explicit regeneration rely on that index as the final concurrency guard and retry unique-key collisions up to five times.
+- Normal generation is idempotent and preserves an existing URL. `POST /api/admin/events/{event}/guests/{guest}/invitation/regenerate` explicitly rotates that guest's token when invalidating the old URL is intended.
+- Seed-only readable URLs such as `invite-demo-andi` remain unchanged for demos and existing stored tokens are not migrated or silently invalidated.
+
 ## Data and compatibility
 
 - Migration: `2026_09_15_000000_create_invitation_configs_table.php`
+- Invitation token constraint (pre-existing): `2026_09_11_034914_create_invitations_table.php`
 - One row per event (`event_id` unique).
 - Structured JSON is used only for the bounded section and copy schema; event facts remain canonical in `events`.
 - The public renderer falls back to the same default configuration if it receives an older API payload without `invitation_config`.

@@ -11,7 +11,9 @@ The existing top-level `photos` array remains available for compatibility and no
 ## Public experience
 
 - The guest-photo carousel shows up to eight approved photos from the **currently selected gallery page**. This intentionally repeats those records in a larger highlight format before the grid; it does not mix in invitation design images or make an extra unbounded request.
-- Previous/next buttons, dots, a visible count, Left/Right keyboard controls, carousel and pagination ARIA labels, and reduced-motion styling support accessible navigation.
+- The carousel autoplays every five seconds when it has at least two photos. It wraps safely and provides explicit pause/resume, previous/next buttons, dots, a visible count, and Left/Right keyboard controls.
+- Hover, focus within the carousel, touch, and manual navigation pause or reset autoplay as appropriate. Zero/one-photo states never start a timer, and `prefers-reduced-motion: reduce` disables autoplay and visual transitions.
+- Carousel/slide labels, current-state attributes, focus indication, and controlled live-region behavior keep navigation accessible without announcing every automatic transition.
 - The active carousel image loads eagerly; inactive carousel images and all gallery thumbnails use native lazy loading.
 - Pagination fetches JSON without a document reload, keeps the Photos & Album section at the same viewport position, and exposes loading, retryable error, empty-album, one-photo, and multi-page states.
 - Relative storage URLs are resolved against the configured API origin; already absolute URLs remain absolute through URL resolution.

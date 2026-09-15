@@ -17,6 +17,7 @@ use App\Services\WapiClient;
 use Endroid\QrCode\QrCode;
 use Endroid\QrCode\Writer\SvgWriter;
 use Illuminate\Database\QueryException;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -951,15 +952,23 @@ Route::middleware(['guestory.auth', 'guestory.role:EVENT_OWNER,SUPERADMIN'])->gr
             return guestNotFoundResponse();
         }
 
-        $invitation = Invitation::updateOrCreate(
-            ['event_id' => $event->id, 'guest_id' => $guest->id],
-            [
-                'token' => $guest->invitation?->token ?? uniqueInvitationToken(),
-                'status' => 'PUBLISHED',
-                'published_at' => now(),
-            ],
-        );
+        $invitation = publishInvitation($event, $guest);
 
+        $guest->forceFill(['invitation_status' => 'SENT'])->save();
+
+        return response()->json(['invitation' => invitationPayload($invitation->load('guest'))], 201);
+    });
+
+    Route::post('/admin/events/{event}/guests/{guest}/invitation/regenerate', function (Request $request, Event $event, Guest $guest) {
+        if (! adminOwnsEvent($request, $event)) {
+            return eventForbiddenResponse();
+        }
+
+        if (! guestBelongsToEvent($guest, $event)) {
+            return guestNotFoundResponse();
+        }
+
+        $invitation = publishInvitation($event, $guest, regenerate: true);
         $guest->forceFill(['invitation_status' => 'SENT'])->save();
 
         return response()->json(['invitation' => invitationPayload($invitation->load('guest'))], 201);
@@ -2506,14 +2515,46 @@ if (! function_exists('qrPayload')) {
     }
 }
 
-if (! function_exists('uniqueInvitationToken')) {
-    function uniqueInvitationToken(): string
+if (! function_exists('newInvitationToken')) {
+    function newInvitationToken(): string
     {
-        do {
-            $token = Str::lower(Str::random(48));
-        } while (Invitation::where('token', $token)->exists());
+        return Str::random(48);
+    }
+}
 
-        return $token;
+if (! function_exists('publishInvitation')) {
+    function publishInvitation(Event $event, Guest $guest, bool $regenerate = false): Invitation
+    {
+        $invitation = Invitation::firstOrNew(['event_id' => $event->id, 'guest_id' => $guest->id]);
+        if ($invitation->exists && ! $regenerate) {
+            $invitation->forceFill(['status' => 'PUBLISHED', 'published_at' => now()])->save();
+
+            return $invitation;
+        }
+
+        for ($attempt = 0; $attempt < 5; $attempt++) {
+            $invitation->token = newInvitationToken();
+            if (Invitation::where('token', $invitation->token)->exists()) {
+                continue;
+            }
+            $invitation->status = 'PUBLISHED';
+            $invitation->published_at = now();
+
+            try {
+                DB::transaction(fn () => $invitation->save());
+
+                return $invitation;
+            } catch (QueryException $exception) {
+                $sqlState = (string) ($exception->errorInfo[0] ?? $exception->getPrevious()?->getCode() ?? $exception->getCode());
+                $isUniqueViolation = $exception instanceof UniqueConstraintViolationException
+                    || in_array($sqlState, ['23000', '23505'], true);
+                if (! $isUniqueViolation || $attempt === 4) {
+                    throw $exception;
+                }
+            }
+        }
+
+        throw new RuntimeException('Unable to allocate a unique invitation token.');
     }
 }
 
@@ -2624,14 +2665,7 @@ if (! function_exists('photoNotFoundResponse')) {
 if (! function_exists('sendInvitationWhatsApp')) {
     function sendInvitationWhatsApp(Event $event, Guest $guest, WapiClient $wapi): WhatsAppMessage
     {
-        $invitation = Invitation::updateOrCreate(
-            ['event_id' => $event->id, 'guest_id' => $guest->id],
-            [
-                'token' => $guest->invitation?->token ?? uniqueInvitationToken(),
-                'status' => 'PUBLISHED',
-                'published_at' => now(),
-            ],
-        );
+        $invitation = publishInvitation($event, $guest);
 
         $guest->forceFill(['invitation_status' => 'SENT'])->save();
 

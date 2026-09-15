@@ -1,5 +1,5 @@
 import { CalendarDays, CameraOff, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, GripVertical, ImagePlus, MapPin, Pause, Play, QrCode, Save, Smartphone, Star, Trash2, Upload } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState, type DragEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react'
 import { useSelectedEventId } from './eventSelection'
 
 export type SectionId = 'hero' | 'details' | 'slideshow' | 'qr' | 'rsvp' | 'photos'
@@ -66,13 +66,50 @@ function Slideshow({ assets = [], heading, copy, assetUrl }: { assets?: Slidesho
 function GuestPhotoAlbum({ photos, meta, loading = false, error, assetUrl, onPageChange }: { photos: AlbumPhoto[]; meta?: AlbumMeta; loading?: boolean; error?: string; assetUrl: (value: string) => string; onPageChange?: (page: number) => void }) {
   const slides = photos.filter((photo) => photo.file_url).slice(0, 8)
   const [active, setActive] = useState(0)
-  const move = (step: number) => setActive((index) => (index + step + slides.length) % slides.length)
+  const [paused, setPaused] = useState(false)
+  const [interacting, setInteracting] = useState(false)
+  const [reduceMotion, setReduceMotion] = useState(() => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false)
+  const [timerReset, setTimerReset] = useState(0)
+  const touchResumeTimer = useRef<number | undefined>(undefined)
+  const current = slides.length > 0 ? active % slides.length : 0
+  const manualNavigate = useCallback((next: number | ((index: number) => number)) => {
+    setActive(next)
+    setTimerReset((value) => value + 1)
+  }, [])
+  const move = useCallback((step: number) => {
+    if (slides.length < 2) return
+    manualNavigate((index) => (index + step + slides.length) % slides.length)
+  }, [manualNavigate, slides.length])
+  useEffect(() => {
+    const query = window.matchMedia?.('(prefers-reduced-motion: reduce)')
+    if (!query) return
+    const update = () => setReduceMotion(query.matches)
+    query.addEventListener('change', update)
+    return () => query.removeEventListener('change', update)
+  }, [])
+  useEffect(() => {
+    if (paused || interacting || reduceMotion || slides.length < 2) return
+    const timer = window.setTimeout(() => setActive((index) => (index + 1) % slides.length), 5000)
+    return () => window.clearTimeout(timer)
+  }, [active, interacting, paused, reduceMotion, slides.length, timerReset])
+  useEffect(() => () => window.clearTimeout(touchResumeTimer.current), [])
+  useEffect(() => {
+    if (active < slides.length) return
+    // The selected album page can replace the slide collection.
+    // oxlint-disable-next-line react/set-state-in-effect
+    setActive(0)
+  }, [active, slides.length])
+  const pauseForTouch = () => {
+    setInteracting(true)
+    window.clearTimeout(touchResumeTimer.current)
+    touchResumeTimer.current = window.setTimeout(() => setInteracting(false), 4000)
+  }
   const pages = meta ? Array.from({ length: Math.min(5, meta.last_page) }, (_, index) => Math.max(1, Math.min(meta.last_page - 4, meta.current_page - 2)) + index) : []
 
   if (!loading && photos.length === 0 && !error) return <div className="ibAlbumEmpty"><CameraOff aria-hidden="true" /><strong>Belum ada foto tamu yang disetujui</strong><span>Foto yang sudah disetujui admin akan tampil di sini.</span></div>
 
   return <div className="ibGuestAlbum" aria-busy={loading}>
-    {slides.length > 0 && <div className="ibGuestHighlights"><div><p className="ibKicker">Sorotan foto tamu</p><small>Menampilkan hingga 8 foto dari halaman galeri ini.</small></div><div className="ibGuestCarousel" tabIndex={0} role="region" aria-roledescription="carousel" aria-label="Sorotan foto tamu yang disetujui" onKeyDown={(event) => { if (event.key === 'ArrowLeft') move(-1); if (event.key === 'ArrowRight') move(1) }}><div className="ibGuestSlide" aria-live="polite">{slides.map((photo, index) => <figure className={index === active % slides.length ? 'active' : ''} aria-hidden={index !== active % slides.length} key={photo.id}>{photo.file_url && <img src={assetUrl(photo.file_url)} alt={`Foto tamu ${index + 1} dari ${slides.length}, diunggah oleh ${photo.guest_name ?? 'tamu'}`} loading={index === active % slides.length ? 'eager' : 'lazy'} />}<figcaption>{photo.guest_name ?? 'Tamu Guestory'} · {index + 1}/{slides.length}</figcaption></figure>)}</div>{slides.length > 1 && <div className="ibGuestCarouselControls"><button type="button" onClick={() => move(-1)} aria-label="Foto tamu sebelumnya"><ChevronLeft /></button><span aria-live="polite">{active % slides.length + 1} / {slides.length}</span><div className="ibGuestDots" role="group" aria-label="Pilih sorotan foto">{slides.map((photo, index) => <button type="button" key={photo.id} className={active % slides.length === index ? 'active' : ''} aria-current={active % slides.length === index ? 'true' : undefined} aria-label={`Tampilkan foto tamu ${index + 1}`} onClick={() => setActive(index)} />)}</div><button type="button" onClick={() => move(1)} aria-label="Foto tamu berikutnya"><ChevronRight /></button></div>}</div></div>}
+    {slides.length > 0 && <div className="ibGuestHighlights"><div><p className="ibKicker">Sorotan foto tamu</p><small>Menampilkan hingga 8 foto dari halaman galeri ini.</small></div><div className="ibGuestCarousel" tabIndex={0} role="region" aria-roledescription="carousel" aria-label="Sorotan foto tamu yang disetujui" onMouseEnter={() => setInteracting(true)} onMouseLeave={() => setInteracting(false)} onFocusCapture={() => setInteracting(true)} onBlurCapture={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setInteracting(false) }} onTouchStart={pauseForTouch} onKeyDown={(event) => { if (event.key === 'ArrowLeft') { event.preventDefault(); move(-1) } if (event.key === 'ArrowRight') { event.preventDefault(); move(1) } }}><div className="ibGuestSlide" aria-live={paused || reduceMotion ? 'polite' : 'off'}>{slides.map((photo, index) => <figure className={index === current ? 'active' : ''} aria-hidden={index !== current} aria-roledescription="slide" aria-label={`${index + 1} dari ${slides.length}`} key={photo.id}>{photo.file_url && <img src={assetUrl(photo.file_url)} alt={`Foto tamu ${index + 1} dari ${slides.length}, diunggah oleh ${photo.guest_name ?? 'tamu'}`} loading={index === current ? 'eager' : 'lazy'} />}<figcaption>{photo.guest_name ?? 'Tamu Guestory'} · {index + 1}/{slides.length}</figcaption></figure>)}</div>{slides.length > 1 && <div className="ibGuestCarouselControls"><button type="button" onClick={() => move(-1)} aria-label="Foto tamu sebelumnya"><ChevronLeft /></button><span aria-live="polite">{current + 1} / {slides.length}</span><div className="ibGuestDots" role="group" aria-label="Pilih sorotan foto">{slides.map((photo, index) => <button type="button" key={photo.id} className={current === index ? 'active' : ''} aria-current={current === index ? 'true' : undefined} aria-label={`Tampilkan foto tamu ${index + 1}`} onClick={() => manualNavigate(index)} />)}</div><button type="button" onClick={() => move(1)} aria-label="Foto tamu berikutnya"><ChevronRight /></button><button type="button" onClick={() => setPaused((value) => !value)} aria-label={paused ? 'Lanjutkan putar otomatis foto tamu' : 'Jeda putar otomatis foto tamu'} aria-pressed={paused}>{paused ? <Play /> : <Pause />}</button></div>}</div></div>}
     <div className="ibGalleryHeading"><div><p className="ibKicker">Galeri disetujui</p><small>{meta?.total ? `${meta.from}–${meta.to} dari ${meta.total} foto` : 'Foto tamu yang telah disetujui admin'}</small></div>{loading && <span className="ibAlbumLoading" role="status"><i aria-hidden="true" /> Memuat foto…</span>}</div>
     {error && <div className="ibAlbumError" role="alert"><span>{error}</span>{meta && <button type="button" onClick={() => onPageChange?.(meta.current_page)}>Coba lagi</button>}</div>}
     <div className="ibAlbum" aria-live="polite">{photos.map((photo, index) => <figure key={photo.id}>{photo.file_url && <img src={assetUrl(photo.file_url)} alt={`Foto galeri dari ${photo.guest_name ?? 'tamu'}`} loading="lazy" />}<figcaption>{photo.guest_name ?? 'Guestory'} · foto {index + 1}</figcaption></figure>)}</div>

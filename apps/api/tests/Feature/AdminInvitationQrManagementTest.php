@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Event;
 use App\Models\Guest;
+use App\Models\Invitation;
 use App\Models\QRToken;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -40,6 +41,61 @@ class AdminInvitationQrManagementTest extends TestCase
         $this->assertNotEmpty($qrResponse->json('qr.token'));
         $this->assertStringContainsString('/api/g/', $qrResponse->json('qr.payload_url'));
         $this->assertSame(1, QRToken::where('guest_id', $guest->id)->where('status', 'ACTIVE')->count());
+    }
+
+    public function test_real_invitation_tokens_are_opaque_unique_and_regeneration_rotates_only_the_requested_guest(): void
+    {
+        $this->seed();
+
+        $event = Event::where('name', 'Andi & Sinta Wedding')->firstOrFail();
+        $guests = collect(['Opaque Guest One', 'Opaque Guest Two'])->map(fn (string $name, int $index) => Guest::create([
+            'event_id' => $event->id,
+            'guest_code' => 'OPAQUE-'.($index + 1),
+            'name' => $name,
+            'guest_count' => 1,
+            'rsvp_status' => 'PENDING',
+            'invitation_status' => 'NOT_SENT',
+            'attendance_status' => 'NOT_CHECKED_IN',
+        ]));
+
+        $responses = $guests->map(fn (Guest $guest) => $this
+            ->postJson("/api/admin/events/{$event->id}/guests/{$guest->id}/invitation/generate", [], $this->adminAuthHeaders())
+            ->assertCreated());
+        $tokens = $responses->map(fn ($response) => basename($response->json('invitation.url')));
+
+        $this->assertCount(2, $tokens->unique());
+        foreach ($tokens as $index => $token) {
+            $this->assertMatchesRegularExpression('/^[A-Za-z0-9]{48}$/', $token);
+            $this->assertNotSame((string) $guests[$index]->id, $token);
+            $this->assertNotSame((string) $event->id, $token);
+            $this->assertSame('/invite/'.$token, parse_url($responses[$index]->json('invitation.url'), PHP_URL_PATH));
+        }
+
+        $oldToken = $tokens[0];
+        $newToken = basename($this
+            ->postJson("/api/admin/events/{$event->id}/guests/{$guests[0]->id}/invitation/regenerate", [], $this->adminAuthHeaders())
+            ->assertCreated()
+            ->json('invitation.url'));
+
+        $this->assertNotSame($oldToken, $newToken);
+        $this->assertNotSame($tokens[1], $newToken);
+        $this->assertMatchesRegularExpression('/^[A-Za-z0-9]{48}$/', $newToken);
+        $this->assertDatabaseMissing('invitations', ['token' => $oldToken]);
+        $this->assertDatabaseHas('invitations', ['guest_id' => $guests[1]->id, 'token' => $tokens[1]]);
+    }
+
+    public function test_demo_invitation_token_is_preserved_by_normal_generation(): void
+    {
+        $this->seed();
+
+        $event = Event::where('name', 'Andi & Sinta Wedding')->firstOrFail();
+        $guest = Guest::where('guest_code', 'GUEST-003')->firstOrFail();
+
+        $this->postJson("/api/admin/events/{$event->id}/guests/{$guest->id}/invitation/generate", [], $this->adminAuthHeaders())
+            ->assertCreated()
+            ->assertJsonPath('invitation.url', fn (string $url) => str_ends_with($url, '/invite/invite-demo-andi'));
+
+        $this->assertSame('invite-demo-andi', Invitation::where('guest_id', $guest->id)->value('token'));
     }
 
     public function test_admin_can_list_invitations_and_qr_codes(): void
