@@ -32,6 +32,7 @@ import { markDuplicates, normalizeIndonesianPhone as normalizeImportedPhone, par
 import './invitation-builder.css'
 import { InvitationBuilderPage, InvitationRenderer, type AlbumMeta, type InvitationConfig } from './InvitationBuilder'
 import { AdminHelpPage, ReceiverHelpPage } from './UserGuide'
+import { likelyMatchQuery, walkInPayload } from './walkIn'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? '/api'
 
@@ -105,6 +106,7 @@ type ReceiverGuest = {
   category?: string
   guest_count: number
   attendance_status: string
+  walk_in?: boolean
   check_in?: {
     method: string
     checked_in_time?: string
@@ -121,6 +123,14 @@ type ReceiverCheckIn = {
     name: string
     category?: string
   }
+}
+
+type WalkInResult = {
+  replayed: boolean
+  guest: { id: number; name: string; guest_count: number; attendance_status: string }
+  invitation: { url: string; status: string }
+  qr: { svg_url: string; url: string; status: string }
+  check_in: { status: string; method: string; actual_guest_count: number; checked_in_at: string }
 }
 
 type ValidationResult = {
@@ -179,6 +189,7 @@ type AdminDashboard = {
 }
 
 type AdminGuest = AdminGuestLite & {
+  walk_in?: boolean
   category?: string
   email?: string
   guest_count: number
@@ -200,6 +211,7 @@ type AttendanceRow = {
   guest_code: string
   name: string
   category: string
+  walk_in?: boolean
   rsvp_status: string
   attendance_status: string
   guest_count: number
@@ -212,6 +224,7 @@ type AttendanceRow = {
 type GuestBookRow = {
   check_in_id: number
   guest_name: string
+  walk_in?: boolean
   category: string
   actual_guest_count: number
   method: string
@@ -899,6 +912,7 @@ function AdminCmsApp() {
   const [dashboard, setDashboard] = useState<AdminDashboard | null>(null)
   const [guests, setGuests] = useState<AdminGuest[]>([])
   const [guestSearch, setGuestSearch] = useState('')
+  const [guestWalkInFilter, setGuestWalkInFilter] = useState('')
   const [guestForm, setGuestForm] = useState(emptyGuestForm)
   const [showGuestModal, setShowGuestModal] = useState(false)
   const [showImportModal, setShowImportModal] = useState(false)
@@ -980,6 +994,7 @@ function AdminCmsApp() {
 
     const query = new URLSearchParams()
     if (guestSearch) query.set('search', guestSearch)
+    if (guestWalkInFilter) query.set('walk_in', guestWalkInFilter)
 
     try {
       const [dashboardJson, guestJson] = await Promise.all([
@@ -993,7 +1008,7 @@ function AdminCmsApp() {
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Gagal memuat CMS.')
     }
-  }, [adminFetch, guestSearch, selectedEventId, token])
+  }, [adminFetch, guestSearch, guestWalkInFilter, selectedEventId, token])
 
   async function readContactFile(file: File | null) {
     if (!file) return
@@ -1301,6 +1316,7 @@ function AdminCmsApp() {
               </div>
               <div className="inlineActions">
                 <input value={guestSearch} onChange={(event) => setGuestSearch(event.target.value)} placeholder="Search guest" />
+                <select aria-label="Filter tipe tamu" value={guestWalkInFilter} onChange={(event) => setGuestWalkInFilter(event.target.value)}><option value="">Semua tipe</option><option value="0">Undangan normal</option><option value="1">Walk-in</option></select>
                 <button type="button" onClick={() => loadEventWorkspace()}>
                   <Search size={17} />
                   Search
@@ -1317,7 +1333,7 @@ function AdminCmsApp() {
               {(pageMode === 'overview' ? guests.slice(0, 5) : guests).map((guest) => (
                 <article key={guest.id}>
                   <div>
-                    <strong>{guest.name}</strong>
+                    <strong>{guest.name} {guest.walk_in ? <em className="walkInBadge">WALK-IN</em> : null}</strong>
                     <span>{guest.guest_code} · {guest.category ?? 'Other'} · {guest.guest_count} tamu</span>
                   </div>
                   <em>{guest.rsvp_status}</em>
@@ -1557,6 +1573,8 @@ function AdminAttendancePage() {
   const [attendance, setAttendance] = useState<AttendanceRow[]>([])
   const [guestBook, setGuestBook] = useState<GuestBookRow[]>([])
   const [statusFilter, setStatusFilter] = useState('')
+  const [attendanceWalkInFilter, setAttendanceWalkInFilter] = useState('')
+  const [attendanceSummary, setAttendanceSummary] = useState<{ walk_in_records?: number; walk_in_checked_in?: number } | null>(null)
   const [message, setMessage] = useState('Login admin untuk melihat attendance.')
 
   const selectedEvent = events.find((event) => event.id === selectedEventId)
@@ -1643,6 +1661,7 @@ function AdminAttendancePage() {
 
       const query = new URLSearchParams()
       if (statusFilter) query.set('attendance_status', statusFilter)
+      if (attendanceWalkInFilter) query.set('walk_in', attendanceWalkInFilter)
 
       const headers = { Accept: 'application/json', Authorization: `Bearer ${token}` }
       const [attendanceResponse, guestBookResponse] = await Promise.all([
@@ -1660,6 +1679,7 @@ function AdminAttendancePage() {
       }
 
       setAttendance(attendanceJson.attendance ?? [])
+      setAttendanceSummary(attendanceJson.summary ?? null)
       setGuestBook(guestBookJson.guest_book ?? [])
       setMessage('Attendance terupdate dari database.')
     }
@@ -1671,7 +1691,7 @@ function AdminAttendancePage() {
     return () => {
       cancelled = true
     }
-  }, [token, selectedEventId, statusFilter])
+  }, [token, selectedEventId, statusFilter, attendanceWalkInFilter])
 
   if (!token) {
     return (
@@ -1725,6 +1745,8 @@ function AdminAttendancePage() {
             <option value="NOT_CHECKED_IN">Not Checked In</option>
           </select>
         </label>
+        <label>Tipe tamu<select value={attendanceWalkInFilter} onChange={(event) => setAttendanceWalkInFilter(event.target.value)}><option value="">Semua</option><option value="0">Undangan normal</option><option value="1">Walk-in</option></select></label>
+        <span><strong>{attendanceSummary?.walk_in_records ?? 0}</strong> walk-in record · <strong>{attendanceSummary?.walk_in_checked_in ?? 0}</strong> pax</span>
         <button className="downloadLink" type="button" onClick={downloadAttendance}>
           <Download size={18} />
           Export CSV
@@ -1743,7 +1765,7 @@ function AdminAttendancePage() {
           <div className="attendanceTable">
             {attendance.map((row) => (
               <div key={row.guest_id}>
-                <strong>{row.name}</strong>
+                <strong>{row.name} {row.walk_in ? <em className="walkInBadge">WALK-IN</em> : null}</strong>
                 <span>{row.category}</span>
                 <span>{row.rsvp_status}</span>
                 <em>{row.attendance_status}</em>
@@ -1766,7 +1788,7 @@ function AdminAttendancePage() {
             <div key={row.check_in_id}>
               <Clock3 size={16} />
               <span>{row.checked_in_time ?? '-'}</span>
-              <strong>{row.guest_name}</strong>
+              <strong>{row.guest_name} {row.walk_in ? <em className="walkInBadge">WALK-IN</em> : null}</strong>
               <em>{row.method}</em>
             </div>
           ))}
@@ -2223,6 +2245,11 @@ function ReceiverCheckInApp() {
   const [scannerActive, setScannerActive] = useState(false)
   const [validating, setValidating] = useState(false)
   const [scannerError, setScannerError] = useState('')
+  const [walkInForm, setWalkInForm] = useState({ name: '', phone: '', guest_count: 1, category: '', group_name: '', notes: '' })
+  const [walkInMatches, setWalkInMatches] = useState<ReceiverGuest[]>([])
+  const [walkInResult, setWalkInResult] = useState<WalkInResult | null>(null)
+  const [walkInBusy, setWalkInBusy] = useState(false)
+  const [walkInKey, setWalkInKey] = useState('')
 
   const selectedEvent = events.find((event) => event.id === selectedEventId)
 
@@ -2342,6 +2369,50 @@ function ReceiverCheckInApp() {
     const json = await requestApi<{ guests: ReceiverGuest[] }>(`/receiver/events/${selectedEventId}/guests/search?${query.toString()}`)
     setSearchResults(json.guests)
     setMessage(json.guests.length ? 'Pilih tamu untuk manual check-in.' : 'Tamu tidak ditemukan.')
+  }
+
+  async function findWalkInMatches() {
+    const name = likelyMatchQuery(walkInForm.name)
+    if (!selectedEventId || !name) { setWalkInMatches([]); return }
+    const query = new URLSearchParams({ q: name })
+    const json = await requestApi<{ guests: ReceiverGuest[] }>(`/receiver/events/${selectedEventId}/guests/search?${query.toString()}`)
+    setWalkInMatches(json.guests)
+  }
+
+  async function createWalkIn() {
+    if (!selectedEventId || walkInBusy || !walkInForm.name.trim()) return
+    const key = walkInKey || crypto.randomUUID()
+    setWalkInKey(key)
+    setWalkInBusy(true)
+    setMessage('Membuat walk-in, invitation, QR, dan check-in…')
+    try {
+      const json = await requestApi<WalkInResult>(`/receiver/events/${selectedEventId}/walk-ins`, {
+        method: 'POST',
+        headers: { 'Idempotency-Key': key },
+        body: JSON.stringify(walkInPayload(walkInForm, normalizeIndonesianPhone(walkInForm.phone))),
+      })
+      setWalkInResult(json)
+      setMessage(json.replayed ? 'Hasil walk-in sebelumnya ditampilkan kembali.' : 'Walk-in berhasil check-in. Tidak ada WhatsApp otomatis.')
+      await loadHistory(); await loadReceiverEvents()
+    } catch (error) { setMessage(error instanceof Error ? error.message : 'Walk-in gagal dibuat.') }
+    finally { setWalkInBusy(false) }
+  }
+
+  function resetWalkIn() {
+    setWalkInForm({ name: '', phone: '', guest_count: 1, category: '', group_name: '', notes: '' })
+    setWalkInMatches([]); setWalkInResult(null); setWalkInKey('')
+  }
+
+  async function copyWalkInUrl() {
+    if (!walkInResult?.invitation.url) return
+    await navigator.clipboard.writeText(walkInResult.invitation.url)
+    setMessage('URL invitation disalin.')
+  }
+
+  async function shareWalkIn() {
+    if (!walkInResult?.invitation.url) return
+    if (navigator.share) await navigator.share({ title: `Invitation ${walkInResult.guest.name}`, text: `${walkInResult.guest.name} sudah check-in.`, url: walkInResult.invitation.url })
+    else await copyWalkInUrl()
   }
 
   async function manualCheckIn(guest: ReceiverGuest) {
@@ -2495,6 +2566,24 @@ function ReceiverCheckInApp() {
             </div>
           ) : null}
         </div>
+      </section>
+
+      <section className="receiverSearch walkInSection">
+        <div className="sectionHeader"><div><p className="eyebrow">Walk-in</p><h2>Daftarkan tamu di lokasi</h2></div><UserPlus size={18} /></div>
+        {!walkInResult ? <>
+          <p className="walkInNotice">Cari kemungkinan tamu yang sudah terdaftar terlebih dahulu. Jika cocok, gunakan invitation yang ada dan check-in tanpa membuat duplikat.</p>
+          <div className="walkInForm">
+            <label>Nama (wajib)<input value={walkInForm.name} onChange={(event) => { setWalkInForm({ ...walkInForm, name: event.target.value }); setWalkInMatches([]) }} onBlur={() => void findWalkInMatches()} /></label>
+            <label>WhatsApp (opsional)<input inputMode="tel" value={walkInForm.phone} onChange={(event) => setWalkInForm({ ...walkInForm, phone: event.target.value })} placeholder="081234567890" /></label>
+            <label>Jumlah hadir<input min={1} max={20} type="number" value={walkInForm.guest_count} onChange={(event) => setWalkInForm({ ...walkInForm, guest_count: Number(event.target.value) })} /></label>
+            <label>Kategori (opsional)<select value={walkInForm.category} onChange={(event) => setWalkInForm({ ...walkInForm, category: event.target.value })}><option value="">Pilih</option>{['Family','Friend','Colleague','VIP','Other'].map((item) => <option key={item}>{item}</option>)}</select></label>
+            <label>Relasi (opsional)<input value={walkInForm.group_name} onChange={(event) => setWalkInForm({ ...walkInForm, group_name: event.target.value })} /></label>
+            <label className="walkInNotes">Catatan (opsional)<textarea value={walkInForm.notes} onChange={(event) => setWalkInForm({ ...walkInForm, notes: event.target.value })} /></label>
+          </div>
+          <button type="button" onClick={findWalkInMatches}><Search size={17} /> Cari tamu terdaftar</button>
+          {walkInMatches.length > 0 && <div className="likelyMatches"><strong>Kemungkinan sudah terdaftar</strong>{walkInMatches.map((guest) => <button key={guest.id} type="button" disabled={guest.attendance_status === 'CHECKED_IN'} onClick={() => manualCheckIn(guest)}><span><b>{guest.name}</b><small>{guest.guest_code} · {guest.guest_count} tamu · {guest.category ?? 'Other'}</small></span><em>{guest.attendance_status === 'CHECKED_IN' ? 'Sudah check-in' : 'Gunakan tamu ini'}</em></button>)}</div>}
+          <button className="primary wideButton" type="button" disabled={walkInBusy || !walkInForm.name.trim()} onClick={createWalkIn}>{walkInBusy ? 'Menyimpan…' : 'Buat walk-in & check-in'}</button>
+        </> : <div className="walkInSuccess"><CheckCircle2 size={32} /><h3>{walkInResult.guest.name}</h3><strong>CHECKED IN · {walkInResult.check_in.actual_guest_count} hadir</strong><img src={walkInResult.qr.svg_url} alt={`QR invitation ${walkInResult.guest.name}`} /><code>{walkInResult.invitation.url}</code><div className="inlineActions"><a className="buttonLike" href={walkInResult.invitation.url} target="_blank" rel="noreferrer">Open</a><button type="button" onClick={copyWalkInUrl}>Copy</button><button type="button" onClick={shareWalkIn}>Share</button><button type="button" onClick={resetWalkIn}>Walk-in berikutnya</button></div><small>Invitation personal aktif; WhatsApp tidak dikirim otomatis.</small></div>}
       </section>
 
       <section className="receiverSearch">

@@ -48,7 +48,8 @@ class EventQuotaEnforcementTest extends TestCase
             ->assertJsonPath('quota.guest_limit', 50)
             ->assertJsonPath('quota.guest_records_used', 49)
             ->assertJsonPath('quota.guest_records_remaining', 1)
-            ->assertJsonPath('quota.semantics', 'Guest quota counts guest records, not guest_count headcount.');
+            ->assertJsonPath('quota.walk_in_records', 0)
+            ->assertJsonPath('quota.semantics', 'Guest quota counts normal guest records only; walk-ins are tracked separately and can only bypass quota through the receiver walk-in endpoint.');
     }
 
     public function test_import_overflow_is_rejected_all_or_nothing(): void

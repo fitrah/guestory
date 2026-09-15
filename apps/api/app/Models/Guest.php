@@ -8,6 +8,9 @@ class Guest extends Model
 {
     protected $fillable = [
         'event_id',
+        'walk_in',
+        'walk_in_idempotency_key',
+        'walk_in_request_fingerprint',
         'guest_code',
         'name',
         'phone',
@@ -21,6 +24,13 @@ class Guest extends Model
         'attendance_status',
         'notes',
     ];
+
+    protected function casts(): array
+    {
+        return [
+            'walk_in' => 'boolean',
+        ];
+    }
 
     public function event()
     {

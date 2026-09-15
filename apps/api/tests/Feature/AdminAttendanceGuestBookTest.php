@@ -70,7 +70,7 @@ class AdminAttendanceGuestBookTest extends TestCase
             ->assertOk()
             ->assertHeader('Content-Type', 'text/csv; charset=UTF-8');
 
-        $this->assertStringContainsString('guest_code,name,category,rsvp_status,attendance_status', $response->getContent());
+        $this->assertStringContainsString('guest_code,name,walk_in,category,rsvp_status,attendance_status', $response->getContent());
         $this->assertStringContainsString('GUEST-002', $response->getContent());
     }
 
@@ -98,7 +98,7 @@ class AdminAttendanceGuestBookTest extends TestCase
             ->assertOk()
             ->assertHeader('Content-Type', 'text/csv; charset=UTF-8');
 
-        $this->assertStringContainsString('guest_code,guest_name,category,guest_count,actual_guest_count,method', $response->getContent());
+        $this->assertStringContainsString('guest_code,guest_name,walk_in,category,guest_count,actual_guest_count,method', $response->getContent());
         $this->assertStringContainsString('Sinta Dewi', $response->getContent());
     }
 

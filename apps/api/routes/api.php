@@ -726,6 +726,7 @@ Route::middleware(['guestory.auth', 'guestory.role:EVENT_OWNER,SUPERADMIN'])->gr
 
         $data = $request->validate([
             'search' => ['nullable', 'string', 'max:120'],
+            'walk_in' => ['nullable', Rule::in(['0', '1', 0, 1, true, false])],
             'category' => ['nullable', 'string', 'max:80'],
             'rsvp_status' => ['nullable', 'string', Rule::in(['PENDING', 'ATTENDING', 'DECLINED'])],
             'invitation_status' => ['nullable', 'string', Rule::in(['DRAFT', 'SENT', 'OPENED'])],
@@ -735,6 +736,7 @@ Route::middleware(['guestory.auth', 'guestory.role:EVENT_OWNER,SUPERADMIN'])->gr
 
         $guests = $event->guests()
             ->when($data['search'] ?? null, fn ($query, string $search) => $query->where('name', 'ilike', "%{$search}%"))
+            ->when(array_key_exists('walk_in', $data), fn ($query) => $query->where('walk_in', filter_var($data['walk_in'], FILTER_VALIDATE_BOOLEAN)))
             ->when($data['category'] ?? null, fn ($query, string $category) => $query->where('category', $category))
             ->when($data['rsvp_status'] ?? null, fn ($query, string $status) => $query->where('rsvp_status', $status))
             ->when($data['invitation_status'] ?? null, fn ($query, string $status) => $query->where('invitation_status', $status))
@@ -760,7 +762,7 @@ Route::middleware(['guestory.auth', 'guestory.role:EVENT_OWNER,SUPERADMIN'])->gr
         }
         $result = DB::transaction(function () use ($event, $data, $billing) {
             $lockedEvent = Event::query()->whereKey($event->id)->lockForUpdate()->firstOrFail();
-            $current = $lockedEvent->guests()->count();
+            $current = $lockedEvent->guests()->where('walk_in', false)->count();
             $limit = (int) $billing->effectiveEntitlements($lockedEvent->load('billing'))['guest_limit'];
             if ($current + 1 > $limit) {
                 return ['quota' => true, 'current' => $current, 'limit' => $limit, 'requested' => 1];
@@ -838,11 +840,21 @@ Route::middleware(['guestory.auth', 'guestory.role:EVENT_OWNER,SUPERADMIN'])->gr
                 ], 422);
             }
             $duplicateReason = null;
-            if ($row['phone'] && (isset($seenPhones[$row['phone']]) || $existingPhones->has($row['phone']))) $duplicateReason = 'phone';
-            if ($row['email'] && (isset($seenEmails[$row['email']]) || $existingEmails->has($row['email']))) $duplicateReason = $duplicateReason ? 'phone_and_email' : 'email';
-            if ($duplicateReason) $duplicates[] = ['row' => $index + 1, 'name' => $row['name'], 'reason' => $duplicateReason];
-            if ($row['phone']) $seenPhones[$row['phone']] = true;
-            if ($row['email']) $seenEmails[$row['email']] = true;
+            if ($row['phone'] && (isset($seenPhones[$row['phone']]) || $existingPhones->has($row['phone']))) {
+                $duplicateReason = 'phone';
+            }
+            if ($row['email'] && (isset($seenEmails[$row['email']]) || $existingEmails->has($row['email']))) {
+                $duplicateReason = $duplicateReason ? 'phone_and_email' : 'email';
+            }
+            if ($duplicateReason) {
+                $duplicates[] = ['row' => $index + 1, 'name' => $row['name'], 'reason' => $duplicateReason];
+            }
+            if ($row['phone']) {
+                $seenPhones[$row['phone']] = true;
+            }
+            if ($row['email']) {
+                $seenEmails[$row['email']] = true;
+            }
             $normalizedRows[] = $row;
         }
 
@@ -853,7 +865,7 @@ Route::middleware(['guestory.auth', 'guestory.role:EVENT_OWNER,SUPERADMIN'])->gr
 
         $result = DB::transaction(function () use ($event, $rows, $billing) {
             $lockedEvent = Event::query()->whereKey($event->id)->lockForUpdate()->firstOrFail();
-            $current = $lockedEvent->guests()->count();
+            $current = $lockedEvent->guests()->where('walk_in', false)->count();
             $limit = (int) $billing->effectiveEntitlements($lockedEvent->load('billing'))['guest_limit'];
             $requested = count($rows);
             if ($current + $requested > $limit) {
@@ -894,7 +906,7 @@ Route::middleware(['guestory.auth', 'guestory.role:EVENT_OWNER,SUPERADMIN'])->gr
             return eventForbiddenResponse();
         }
 
-        $headers = ['guest_code', 'name', 'phone', 'email', 'category', 'group_name', 'guest_count', 'table_number', 'rsvp_status', 'invitation_status', 'attendance_status', 'notes'];
+        $headers = ['guest_code', 'name', 'walk_in', 'phone', 'email', 'category', 'group_name', 'guest_count', 'table_number', 'rsvp_status', 'invitation_status', 'attendance_status', 'notes'];
         $lines = [csvLine($headers)];
 
         $event->guests()->orderBy('name')->each(function (Guest $guest) use (&$lines, $headers) {
@@ -1249,6 +1261,8 @@ Route::middleware(['guestory.auth', 'guestory.role:EVENT_OWNER,SUPERADMIN'])->ge
     }
 
     $totalGuests = $event->guests()->count();
+    $normalGuestRecords = $event->guests()->where('walk_in', false)->count();
+    $walkInRecords = $event->guests()->where('walk_in', true)->count();
     $entitlements = $billing->effectiveEntitlements($event->load('billing'));
     $guestLimit = (int) $entitlements['guest_limit'];
     $confirmedGuests = $event->guests()->where('rsvp_status', 'ATTENDING')->sum('guest_count');
@@ -1265,12 +1279,15 @@ Route::middleware(['guestory.auth', 'guestory.role:EVENT_OWNER,SUPERADMIN'])->ge
         'quota' => [
             'plan_code' => $event->billing && in_array($event->billing->status, ['ACTIVE', 'PAID'], true) ? $event->billing->plan_code : 'FREE',
             'guest_limit' => $guestLimit,
-            'guest_records_used' => $totalGuests,
-            'guest_records_remaining' => max($guestLimit - $totalGuests, 0),
-            'semantics' => 'Guest quota counts guest records, not guest_count headcount.',
+            'guest_records_used' => $normalGuestRecords,
+            'guest_records_remaining' => max($guestLimit - $normalGuestRecords, 0),
+            'walk_in_records' => $walkInRecords,
+            'semantics' => 'Guest quota counts normal guest records only; walk-ins are tracked separately and can only bypass quota through the receiver walk-in endpoint.',
         ],
         'metrics' => [
             'total_guests' => $totalGuests,
+            'normal_guest_records' => $normalGuestRecords,
+            'walk_in_records' => $walkInRecords,
             'confirmed_guests' => $confirmedGuests,
             'pending_rsvp' => $event->guests()->where('rsvp_status', 'PENDING')->count(),
             'declined' => $event->guests()->where('rsvp_status', 'DECLINED')->count(),
@@ -1322,13 +1339,14 @@ Route::middleware(['guestory.auth', 'guestory.role:EVENT_OWNER,SUPERADMIN'])->gr
         $data = attendanceFilterRules($request);
         $records = attendanceRecords($event, $data);
         $lines = [
-            csvLine(['guest_code', 'name', 'category', 'rsvp_status', 'attendance_status', 'guest_count', 'actual_guest_count', 'method', 'checked_in_at', 'receiver']),
+            csvLine(['guest_code', 'name', 'walk_in', 'category', 'rsvp_status', 'attendance_status', 'guest_count', 'actual_guest_count', 'method', 'checked_in_at', 'receiver']),
         ];
 
         foreach ($records as $record) {
             $lines[] = csvLine([
                 $record['guest_code'],
                 $record['name'],
+                $record['walk_in'] ? '1' : '0',
                 $record['category'],
                 $record['rsvp_status'],
                 $record['attendance_status'],
@@ -1409,13 +1427,14 @@ Route::middleware(['guestory.auth', 'guestory.role:EVENT_OWNER,SUPERADMIN'])->gr
             ->map(fn (CheckIn $checkIn) => guestBookPayload($checkIn));
 
         $lines = [
-            csvLine(['guest_code', 'guest_name', 'category', 'guest_count', 'actual_guest_count', 'method', 'checked_in_at', 'receiver']),
+            csvLine(['guest_code', 'guest_name', 'walk_in', 'category', 'guest_count', 'actual_guest_count', 'method', 'checked_in_at', 'receiver']),
         ];
 
         foreach ($checkIns as $record) {
             $lines[] = csvLine([
                 $record['guest_code'],
                 $record['guest_name'],
+                $record['walk_in'] ? '1' : '0',
                 $record['category'],
                 $record['guest_count'],
                 $record['actual_guest_count'],
@@ -1897,6 +1916,84 @@ Route::middleware(['guestory.auth'])->group(function () {
         ];
     });
 
+    Route::post('/receiver/events/{event}/walk-ins', function (Request $request, Event $event) {
+        $receiverEvent = receiverEventOrForbidden($request, $event);
+        if ($receiverEvent) {
+            return $receiverEvent;
+        }
+
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:160'],
+            'phone' => ['nullable', 'string', 'regex:/^\+?(?:62|0)[1-9][0-9]{7,13}$/'],
+            'guest_count' => ['required', 'integer', 'min:1', 'max:20'],
+            'category' => ['nullable', 'string', 'max:80'],
+            'group_name' => ['nullable', 'string', 'max:120'],
+            'notes' => ['nullable', 'string', 'max:2000'],
+        ]);
+        $idempotencyKey = trim((string) $request->header('Idempotency-Key'));
+        if ($idempotencyKey === '' || strlen($idempotencyKey) > 200) {
+            return response()->json(['code' => 'IDEMPOTENCY_KEY_REQUIRED', 'message' => 'Idempotency-Key wajib diisi.'], 422);
+        }
+
+        $data['name'] = trim($data['name']);
+        $data['phone'] = filled($data['phone'] ?? null) ? normalizeWhatsAppRecipient($data['phone']) : null;
+        $fingerprint = hash('sha256', json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+        $storedKey = hash('sha256', $request->user()->id.'|'.$idempotencyKey);
+
+        $result = DB::transaction(function () use ($event, $request, $data, $storedKey, $fingerprint) {
+            $lockedEvent = Event::query()->whereKey($event->id)->lockForUpdate()->firstOrFail();
+            $existing = $lockedEvent->guests()->where('walk_in_idempotency_key', $storedKey)->first();
+            if ($existing) {
+                if (! hash_equals((string) $existing->walk_in_request_fingerprint, $fingerprint)) {
+                    return ['conflict' => true];
+                }
+
+                return ['guest' => $existing, 'replayed' => true];
+            }
+
+            $guest = $lockedEvent->guests()->create([
+                'walk_in' => true,
+                'walk_in_idempotency_key' => $storedKey,
+                'walk_in_request_fingerprint' => $fingerprint,
+                'guest_code' => nextGuestCode($lockedEvent),
+                'name' => $data['name'],
+                'phone' => $data['phone'],
+                'category' => $data['category'] ?? 'Other',
+                'group_name' => $data['group_name'] ?? null,
+                'guest_count' => $data['guest_count'],
+                'rsvp_status' => 'ATTENDING',
+                'invitation_status' => 'SENT',
+                'attendance_status' => 'CHECKED_IN',
+                'notes' => $data['notes'] ?? null,
+            ]);
+            $invitation = publishInvitation($lockedEvent, $guest);
+            $qrToken = $guest->qrTokens()->create([
+                'event_id' => $lockedEvent->id,
+                'token' => uniqueQrToken(),
+                'status' => 'ACTIVE',
+            ]);
+            CheckIn::create([
+                'event_id' => $lockedEvent->id,
+                'guest_id' => $guest->id,
+                'qr_token_id' => $qrToken->id,
+                'receiver_id' => $request->user()->id,
+                'method' => 'WALK_IN',
+                'actual_guest_count' => $data['guest_count'],
+                'checked_in_at' => now(),
+            ]);
+
+            return ['guest' => $guest, 'replayed' => false];
+        });
+
+        if ($result['conflict'] ?? false) {
+            return response()->json(['code' => 'IDEMPOTENCY_KEY_CONFLICT', 'message' => 'Idempotency-Key sudah dipakai untuk data berbeda.'], 409);
+        }
+
+        $guest = $result['guest']->load(['invitation', 'qrTokens', 'checkIn.receiver']);
+
+        return response()->json(walkInSuccessPayload($guest, $result['replayed']), $result['replayed'] ? 200 : 201);
+    })->middleware('throttle:30,1');
+
     Route::post('/receiver/events/{event}/check-ins/manual', function (Request $request, Event $event) {
         $receiverEvent = receiverEventOrForbidden($request, $event);
         if ($receiverEvent) {
@@ -2297,6 +2394,7 @@ if (! function_exists('guestPayload')) {
             'event_id' => $guest->event_id,
             'guest_code' => $guest->guest_code,
             'name' => $guest->name,
+            'walk_in' => $guest->walk_in,
             'phone' => $guest->phone,
             'email' => $guest->email,
             'category' => $guest->category,
@@ -2415,7 +2513,8 @@ if (! function_exists('attendanceFilterRules')) {
             'attendance_status' => ['nullable', 'string', Rule::in(['NOT_CHECKED_IN', 'CHECKED_IN'])],
             'rsvp_status' => ['nullable', 'string', Rule::in(['PENDING', 'ATTENDING', 'DECLINED'])],
             'category' => ['nullable', 'string', 'max:80'],
-            'method' => ['nullable', 'string', Rule::in(['QR', 'MANUAL'])],
+            'method' => ['nullable', 'string', Rule::in(['QR', 'MANUAL', 'WALK_IN'])],
+            'walk_in' => ['nullable', Rule::in(['0', '1', 0, 1, true, false])],
             'sort' => ['nullable', 'string', Rule::in(['check_in_time', 'guest_name'])],
             'direction' => ['nullable', 'string', Rule::in(['asc', 'desc'])],
         ]);
@@ -2445,6 +2544,10 @@ if (! function_exists('attendanceRecords')) {
             $query->whereHas('checkIn', fn ($checkInQuery) => $checkInQuery->where('method', $filters['method']));
         }
 
+        if (array_key_exists('walk_in', $filters)) {
+            $query->where('walk_in', filter_var($filters['walk_in'], FILTER_VALIDATE_BOOLEAN));
+        }
+
         $records = $query->get()->map(fn (Guest $guest) => attendancePayload($guest));
         $direction = $filters['direction'] ?? 'asc';
         $sort = $filters['sort'] ?? 'guest_name';
@@ -2467,6 +2570,7 @@ if (! function_exists('attendancePayload')) {
             'guest_code' => $guest->guest_code,
             'name' => $guest->name,
             'category' => $guest->category,
+            'walk_in' => $guest->walk_in,
             'rsvp_status' => $guest->rsvp_status,
             'attendance_status' => $guest->attendance_status,
             'guest_count' => $guest->guest_count,
@@ -2489,6 +2593,7 @@ if (! function_exists('guestBookPayload')) {
             'guest_id' => $checkIn->guest_id,
             'guest_code' => $checkIn->guest?->guest_code,
             'guest_name' => $checkIn->guest?->name,
+            'walk_in' => (bool) $checkIn->guest?->walk_in,
             'category' => $checkIn->guest?->category,
             'guest_count' => $checkIn->guest?->guest_count,
             'actual_guest_count' => $checkIn->actual_guest_count,
@@ -2505,12 +2610,16 @@ if (! function_exists('attendanceSummary')) {
     {
         $totalGuests = $event->guests()->sum('guest_count');
         $checkedIn = $event->checkIns()->sum('actual_guest_count');
+        $walkInRecords = $event->guests()->where('walk_in', true)->count();
+        $walkInPax = $event->checkIns()->whereHas('guest', fn ($query) => $query->where('walk_in', true))->sum('actual_guest_count');
 
         return [
             'total_guests' => $totalGuests,
             'checked_in' => $checkedIn,
             'not_checked_in' => max($totalGuests - $checkedIn, 0),
             'attendance_rate' => $totalGuests > 0 ? round(($checkedIn / $totalGuests) * 100, 1) : 0,
+            'walk_in_records' => $walkInRecords,
+            'walk_in_checked_in' => $walkInPax,
         ];
     }
 }
@@ -2904,6 +3013,38 @@ if (! function_exists('checkInSuccessPayload')) {
     }
 }
 
+if (! function_exists('walkInSuccessPayload')) {
+    function walkInSuccessPayload(Guest $guest, bool $replayed = false): array
+    {
+        $guest->loadMissing(['invitation', 'checkIn', 'qrTokens']);
+        $qrToken = $guest->qrTokens->where('status', 'ACTIVE')->sortByDesc('id')->first();
+
+        return [
+            'code' => $replayed ? 'WALK_IN_REPLAYED' : 'WALK_IN_CREATED',
+            'message' => $replayed ? 'Walk-in sebelumnya ditampilkan kembali.' : 'Walk-in dibuat dan berhasil check-in.',
+            'replayed' => $replayed,
+            'whatsapp_sent' => false,
+            'guest' => guestPayload($guest),
+            'invitation' => [
+                'url' => invitationPublicUrl($guest->invitation),
+                'token' => $guest->invitation?->token,
+                'status' => $guest->invitation?->status,
+            ],
+            'qr' => [
+                'url' => $qrToken ? qrPublicUrl($qrToken) : null,
+                'svg_url' => $guest->invitation ? url("/api/invite/{$guest->invitation->token}/qr.svg") : null,
+                'status' => $qrToken?->status,
+            ],
+            'check_in' => [
+                'status' => $guest->attendance_status,
+                'method' => $guest->checkIn?->method,
+                'actual_guest_count' => $guest->checkIn?->actual_guest_count,
+                'checked_in_at' => $guest->checkIn?->checked_in_at?->toISOString(),
+            ],
+        ];
+    }
+}
+
 if (! function_exists('checkInPayload')) {
     function checkInPayload(CheckIn $checkIn): array
     {
@@ -2916,6 +3057,7 @@ if (! function_exists('checkInPayload')) {
             'guest' => [
                 'id' => $checkIn->guest_id,
                 'name' => $checkIn->guest?->name,
+                'walk_in' => (bool) $checkIn->guest?->walk_in,
                 'category' => $checkIn->guest?->category,
             ],
             'receiver' => [
@@ -2955,6 +3097,7 @@ if (! function_exists('receiverGuestPayload')) {
             'id' => $guest->id,
             'guest_code' => $guest->guest_code,
             'name' => $guest->name,
+            'walk_in' => $guest->walk_in,
             'category' => $guest->category,
             'group_name' => $guest->group_name,
             'guest_count' => $guest->guest_count,

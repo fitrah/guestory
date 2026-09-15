@@ -288,7 +288,7 @@ Import hanya menambah guest list. Import **tidak membuat atau mengirim invitatio
 
 #### Export guest list
 
-Gunakan endpoint/proses export CSV resmi bila diperlukan. Kolom export lengkap mencakup `guest_code`, `name`, `phone`, `email`, `category`, `group_name`, `guest_count`, `table_number`, status RSVP/invitation/attendance, dan `notes`.
+Gunakan endpoint/proses export CSV resmi bila diperlukan. Kolom export lengkap mencakup `guest_code`, `name`, penanda `walk_in`, `phone`, `email`, `category`, `group_name`, `guest_count`, `table_number`, status RSVP/invitation/attendance, dan `notes`.
 
 ### 5.4 Undangan personal dan QR
 
@@ -533,11 +533,21 @@ Gunakan ini bila QR rusak, tamu tidak membawa undangan, atau kamera tidak dapat 
 
 Perhatian: pada alur manual UI, memilih hasil langsung menyimpan check-in dengan jumlah tamu yang tercatat; tidak ada langkah konfirmasi atau field **Hadir aktual**. Verifikasi dengan teliti sebelum memilih.
 
-### 6.5 Recent history
+### 6.5 Walk-in guest
+
+1. Isi **Nama** lalu pilih **Cari tamu terdaftar**. Guestory menampilkan kemungkinan kecocokan berdasarkan nama pada event aktif.
+2. Jika ada kecocokan, gunakan tombol **Gunakan tamu ini** agar tamu tersebut check-in memakai record dan invitation yang sudah ada. Jangan membuat record baru.
+3. Jika benar-benar tamu baru, isi nama wajib, WhatsApp opsional, jumlah hadir 1–20, kategori/relasi dan catatan opsional.
+4. Pilih **Buat walk-in & check-in** satu kali dan tunggu layar sukses.
+5. Layar sukses menampilkan nama, status checked-in, QR besar menuju invitation personal, URL, serta aksi **Open**, **Copy**, dan native **Share** (fallback ke Copy bila Share tidak tersedia).
+
+Walk-in memiliki invitation dan QR aktif sehingga dapat memakai undangan publik serta mengunggah/menikmati album foto sama seperti tamu undangan normal. Sistem tidak mengirim WhatsApp otomatis. Walk-in tetap boleh dibuat saat quota guest normal habis, tetapi ditandai, difilter, dihitung, dan diekspor terpisah. Bypass quota hanya tersedia pada endpoint Receiver walk-in; **Add Guest** dan **Import kontak** tetap tunduk pada quota paket.
+
+### 6.6 Recent history
 
 Bagian **Recent — Check-ins** menampilkan hingga 10 check-in terbaru pada event terpilih, lengkap dengan waktu, nama, dan metode `QR` atau `MANUAL`. Gunakan untuk memastikan transaksi terakhir tercatat dan untuk menghindari pengulangan.
 
-### 6.6 Berpindah event dan logout
+### 6.7 Berpindah event dan logout
 
 - Ganti dropdown **Event** hanya saat berpindah meja/event yang memang ditugaskan.
 - Setelah berpindah event, hasil validasi QR sebelumnya dibersihkan.
@@ -715,7 +725,7 @@ Pengujian kamera tetap bergantung pada perangkat fisik, browser, pencahayaan, da
 - [ ] Receiver sudah ditugaskan ke event yang tepat.
 - [ ] Perangkat Receiver dapat login, memakai HTTPS, mengakses kamera, dan memiliki koneksi/cadangan daya.
 - [ ] Tim memahami urutan **Validate → periksa identitas/jumlah → Check-in**.
-- [ ] Prosedur fallback pencarian manual sudah disepakati.
+- [ ] Prosedur fallback pencarian manual dan aturan cari-before-create untuk walk-in sudah disepakati.
 - [ ] Pengiriman WhatsApp diuji secara terbatas sebelum **Bulk**.
 
 ### Selama event
@@ -724,6 +734,7 @@ Pengujian kamera tetap bergantung pada perangkat fisik, browser, pencahayaan, da
 - [ ] Kamera dan pencarian manual siap digunakan.
 - [ ] Nama dan jumlah **Hadir aktual** diperiksa sebelum konfirmasi QR.
 - [ ] Manual check-in hanya dipilih setelah identitas cocok.
+- [ ] Walk-in baru dibuat hanya setelah hasil pencarian kemungkinan tamu existing diperiksa.
 - [ ] Pesan sukses ditunggu sebelum melayani tamu berikutnya.
 - [ ] **Recent — Check-ins** dipantau untuk mendeteksi duplikasi/kesalahan.
 - [ ] Admin memantau **Overview** dan **Attendance** lalu melakukan **Refresh** berkala.
@@ -746,7 +757,7 @@ Pengujian kamera tetap bergantung pada perangkat fisik, browser, pencahayaan, da
 Panduan ini membedakan kemampuan backend dengan tombol yang benar-benar tersedia agar pengguna tidak mencari kontrol yang belum ada.
 
 - UI belum menyediakan Edit/Delete event, walaupun backend mendukungnya.
-- UI Guests belum menyediakan Import/Export CSV, walaupun backend mendukungnya.
+- UI Guests menyediakan import VCF/CSV, tetapi export guest list masih melalui endpoint resmi dan belum memiliki tombol tersendiri.
 - UI belum menyediakan regenerasi invitation URL.
 - UI hanya menyediakan buat/regenerasi/unduh QR; revoke/activate QR tersedia di backend tetapi belum di UI.
 - UI Attendance menyediakan ekspor attendance, bukan tombol ekspor Guest Book khusus.

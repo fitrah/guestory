@@ -719,6 +719,23 @@ button.primary,
   font-weight: 800;
 }
 
+.walkInForm { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.walkInForm label { color: #5d6d75; display: grid; font-size: 13px; font-weight: 800; gap: 7px; }
+.walkInForm input, .walkInForm select, .walkInForm textarea { border: 1px solid #cddadb; border-radius: 8px; font: inherit; min-height: 44px; padding: 10px 12px; }
+.walkInNotes { grid-column: 1 / -1; }
+.walkInNotes textarea { min-height: 84px; resize: vertical; }
+.walkInNotice { background: #fff8e7; border-left: 4px solid #d99b23; margin: 0; padding: 12px; }
+.likelyMatches { display: grid; gap: 8px; }
+.likelyMatches > button { align-items: center; background: #fff8e7; border: 1px solid #ebcd8e; border-radius: 8px; display: flex; justify-content: space-between; padding: 12px; text-align: left; }
+.likelyMatches span, .likelyMatches small { display: block; }
+.likelyMatches em { color: #0f7a52; font-style: normal; font-weight: 800; }
+.walkInSuccess { align-items: center; display: grid; gap: 12px; justify-items: center; text-align: center; }
+.walkInSuccess h3 { font-size: 26px; margin: 0; }
+.walkInSuccess img { background: white; border: 1px solid #dce5e6; border-radius: 12px; width: min(320px, 90vw); }
+.walkInSuccess code { max-width: 100%; overflow-wrap: anywhere; }
+.walkInBadge { background: #fff0c9; border-radius: 999px; color: #8b5a00; display: inline-block; font-size: 10px; font-style: normal; margin-left: 6px; padding: 3px 7px; vertical-align: middle; }
+@media (max-width: 620px) { .walkInForm { grid-template-columns: 1fr; } .walkInNotes { grid-column: auto; } }
+
 .adminAttendancePage {
   min-height: 100vh;
   background: #f5f2ec;
