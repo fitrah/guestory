@@ -1,5 +1,6 @@
-import { CalendarDays, Camera, CameraOff, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, GripVertical, ImagePlus, Images, MapPin, Pause, Play, QrCode, Save, Smartphone, Star, Trash2, Upload } from 'lucide-react'
+import { CalendarDays, Camera, CameraOff, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, GripVertical, ImagePlus, Images, MapPin, Pause, Play, QrCode, RefreshCw, Save, Smartphone, Star, SwitchCamera, Trash2, Upload, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react'
+import { cameraErrorMessage, cameraSupportMessage, captureVideoFrame, requestCamera, stopCameraStream } from './cameraCapture'
 import { useSelectedEventId } from './eventSelection'
 
 export type SectionId = 'hero' | 'details' | 'slideshow' | 'qr' | 'rsvp' | 'photos'
@@ -37,7 +38,7 @@ type RendererProps = {
 
 // oxlint-disable-next-line react/only-export-components -- exported for input-semantics regression tests.
 export const guestPhotoInputSemantics = {
-  camera: { accept: 'image/*', capture: 'environment' as const },
+  cameraFallback: { accept: 'image/*', capture: 'environment' as const },
   gallery: { accept: 'image/*' },
 }
 
@@ -123,6 +124,80 @@ function GuestPhotoAlbum({ photos, meta, loading = false, error, assetUrl, onPag
   </div>
 }
 
+function BrowserCamera({ disabled, onPhoto }: { disabled: boolean; onPhoto: (file: File) => void }) {
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const streamRef = useRef<MediaStream | null>(null)
+  const fallbackRef = useRef<HTMLInputElement>(null)
+  const [open, setOpen] = useState(false)
+  const [starting, setStarting] = useState(false)
+  const [error, setError] = useState('')
+  const [captured, setCaptured] = useState<File | null>(null)
+  const [capturedUrl, setCapturedUrl] = useState('')
+  const [devices, setDevices] = useState<MediaDeviceInfo[]>([])
+  const [deviceId, setDeviceId] = useState('')
+
+  const stop = useCallback(() => {
+    stopCameraStream(streamRef.current)
+    streamRef.current = null
+    if (videoRef.current) videoRef.current.srcObject = null
+  }, [])
+  const clearCapture = useCallback(() => {
+    if (capturedUrl) URL.revokeObjectURL(capturedUrl)
+    setCaptured(null)
+    setCapturedUrl('')
+  }, [capturedUrl])
+  const close = useCallback(() => {
+    stop()
+    clearCapture()
+    setOpen(false)
+    setError('')
+  }, [clearCapture, stop])
+  const start = useCallback(async (nextDeviceId?: string) => {
+    setOpen(true); setStarting(true); setError(''); clearCapture(); stop()
+    try {
+      const stream = await requestCamera(nextDeviceId)
+      streamRef.current = stream
+      if (videoRef.current) { videoRef.current.srcObject = stream; await videoRef.current.play() }
+      const available = (await navigator.mediaDevices.enumerateDevices?.() ?? []).filter((device) => device.kind === 'videoinput')
+      setDevices(available)
+      const activeId = stream.getVideoTracks()[0]?.getSettings().deviceId
+      if (activeId) setDeviceId(activeId)
+    } catch (reason) {
+      stop()
+      setError((reason as { name?: string })?.name === 'CameraUnsupportedError' && reason instanceof Error ? reason.message : cameraErrorMessage(reason))
+    } finally { setStarting(false) }
+  }, [clearCapture, stop])
+  useEffect(() => {
+    const handlePageHide = () => stop()
+    window.addEventListener('pagehide', handlePageHide)
+    return () => { window.removeEventListener('pagehide', handlePageHide); stop(); if (capturedUrl) URL.revokeObjectURL(capturedUrl) }
+  }, [capturedUrl, stop])
+
+  async function shutter() {
+    try {
+      const file = await captureVideoFrame(videoRef.current!)
+      stop(); setCaptured(file); setCapturedUrl(URL.createObjectURL(file)); setError('')
+    } catch (reason) { stop(); setError(reason instanceof Error ? reason.message : 'Foto tidak dapat dibuat. Silakan coba lagi.') }
+  }
+  function switchCamera() {
+    if (devices.length < 2) return
+    const index = devices.findIndex((device) => device.deviceId === deviceId)
+    const next = devices[(index + 1) % devices.length]
+    setDeviceId(next.deviceId); void start(next.deviceId)
+  }
+  function usePhoto() { if (captured) { onPhoto(captured); close() } }
+
+  return <>
+    <button className="ibCaptureChoice" type="button" disabled={disabled} onClick={() => void start()}><Camera /><strong>Ambil Foto</strong><span>Buka kamera langsung di browser.</span></button>
+    {open && <div className="ibCameraBackdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) close() }}><section className="ibCameraDialog" role="dialog" aria-modal="true" aria-labelledby="guest-camera-title"><header><div><p className="ibKicker">Kamera browser</p><h3 id="guest-camera-title">Ambil foto</h3></div><button type="button" onClick={close} aria-label="Tutup kamera"><X /></button></header>
+      <div className="ibCameraViewport">{capturedUrl ? <img src={capturedUrl} alt="Hasil foto kamera" /> : <video ref={(node) => { videoRef.current = node; if (node && streamRef.current) { node.srcObject = streamRef.current; void node.play() } }} autoPlay muted playsInline aria-label="Pratinjau kamera langsung" />}{starting && <span role="status">Membuka kamera…</span>}</div>
+      {error && <div className="ibCameraError" role="alert"><strong>Kamera tidak tersedia</strong><span>{error}</span><button type="button" onClick={() => fallbackRef.current?.click()}><Images /> Pilih dari Galeri</button></div>}
+      <div className="ibCameraActions">{captured ? <><button type="button" onClick={() => void start(deviceId || undefined)}><RefreshCw /> Ambil ulang</button><button type="button" onClick={usePhoto}><CheckCircle2 /> Gunakan foto</button></> : <><button type="button" disabled={starting || !!error} onClick={() => void shutter()}><Camera /> Jepret</button>{devices.length > 1 && <button type="button" disabled={starting} onClick={switchCamera}><SwitchCamera /> Ganti kamera</button>}<button type="button" onClick={close}>Batal</button></>}</div>
+      <input ref={fallbackRef} className="ibCameraFallbackInput" aria-label="Pilih dari Galeri setelah kamera gagal" type="file" accept={guestPhotoInputSemantics.gallery.accept} onChange={(event) => { const file = event.target.files?.[0]; if (file) { onPhoto(file); close() }; event.currentTarget.value = '' }} />
+    </section></div>}
+  </>
+}
+
 export function InvitationRenderer({ invite, config, preview = false, qrUrl, photos = [], slideshowAssets, albumMeta, albumLoading, albumError, onAlbumPageChange, message, selectedPhotoName, selectedPhotoPreview, photoUploading = false, photoCanUpload = true, onRsvp, onPhotoSelect, onPhotoUpload, assetUrl = (value) => value }: RendererProps) {
   const resolved = normalizeConfig(config ?? invite.invitation_config, invite.event.name)
   const enabled = [...resolved.sections].filter((section) => section.enabled).sort((a, b) => a.order - b.order)
@@ -133,7 +208,7 @@ export function InvitationRenderer({ invite, config, preview = false, qrUrl, pho
     if (id === 'slideshow') { const assets = slideshowAssets ?? invite.slideshow_assets ?? []; return <Slideshow key={`${id}-${assets.map(({ id: assetId }) => assetId).join('-')}`} assets={assets} heading={c.slideshow_heading} copy={c.slideshow_message} assetUrl={assetUrl} /> }
     if (id === 'qr') return <section className="ibSection ibQr" key={id}><div><p className="ibKicker">{c.qr_heading}</p><h2>{invite.guest.name}</h2><p>{invite.guest.guest_count} tamu dalam undangan ini</p></div>{qrUrl ? <img alt={`QR untuk ${invite.guest.name}`} src={qrUrl} /> : <div className="ibQrPlaceholder"><QrCode /></div>}<small>{c.qr_message}</small></section>
     if (id === 'rsvp') return <section className="ibSection ibRsvp" key={id}><p className="ibKicker">{c.rsvp_heading}</p><h2>{rsvpLabel(invite.guest.rsvp_status)}</h2><div><button type="button" disabled={preview} onClick={() => onRsvp?.('ATTENDING')}><CheckCircle2 /> Hadir</button><button type="button" disabled={preview} onClick={() => onRsvp?.('DECLINED')}>Tidak hadir</button></div>{message ? <p className="ibStatus">{message}</p> : null}</section>
-    return <section className="ibSection ibPhotos" id="guest-photo-album" key={id}><p className="ibKicker">Photos &amp; Album</p><h2>{c.photos_heading}</h2><p>{c.photos_message}</p>{!preview && <div className="ibUpload" aria-busy={photoUploading}>{photoCanUpload ? <><div className="ibUploadChoices"><label><Camera /><strong>Ambil Foto</strong><span>Kamera belakang bila didukung perangkat.</span><input aria-label="Ambil Foto" type="file" accept={guestPhotoInputSemantics.camera.accept} capture={guestPhotoInputSemantics.camera.capture} disabled={photoUploading} onChange={(event) => { onPhotoSelect?.(event.target.files?.[0] ?? null, 'camera'); event.currentTarget.value = '' }} /></label><label><Images /><strong>Pilih dari Galeri</strong><span>Gunakan foto yang sudah tersimpan.</span><input aria-label="Pilih dari Galeri" type="file" accept={guestPhotoInputSemantics.gallery.accept} disabled={photoUploading} onChange={(event) => { onPhotoSelect?.(event.target.files?.[0] ?? null, 'gallery'); event.currentTarget.value = '' }} /></label></div>{selectedPhotoPreview && <figure className="ibUploadPreview"><img src={selectedPhotoPreview} alt="Preview foto yang akan diupload" /><figcaption>{selectedPhotoName}</figcaption></figure>}<button type="button" disabled={photoUploading || !selectedPhotoName} onClick={onPhotoUpload}>{photoUploading ? <span className="ibUploadSpinner" aria-hidden="true" /> : <Upload />} {photoUploading ? 'Mengupload…' : 'Upload foto'}</button><small aria-live="polite">{photoUploading ? 'Foto sedang dikirim. Jangan tutup halaman ini.' : selectedPhotoName || 'Jika kamera tidak tersedia atau izin ditolak, gunakan Pilih dari Galeri. JPG, PNG, atau WebP maksimal 5 MB.'}</small></> : <div className="ibUploadLocked" role="note"><CameraOff aria-hidden="true" /><div><strong>Check-in diperlukan untuk upload foto</strong><span>Album tetap dapat dilihat. Setelah check-in untuk event ini berhasil, buka ulang undangan untuk memakai kamera atau galeri.</span></div></div>}</div>}<GuestPhotoAlbum photos={photos} meta={albumMeta} loading={albumLoading} error={albumError} assetUrl={assetUrl} onPageChange={onAlbumPageChange} /></section>
+    return <section className="ibSection ibPhotos" id="guest-photo-album" key={id}><p className="ibKicker">Photos &amp; Album</p><h2>{c.photos_heading}</h2><p>{c.photos_message}</p>{!preview && <div className="ibUpload" aria-busy={photoUploading}>{photoCanUpload ? <><div className="ibUploadChoices"><BrowserCamera disabled={photoUploading} onPhoto={(file) => onPhotoSelect?.(file, 'camera')} /><label><Images /><strong>Pilih dari Galeri</strong><span>Gunakan foto yang sudah tersimpan.</span><input aria-label="Pilih dari Galeri" type="file" accept={guestPhotoInputSemantics.gallery.accept} disabled={photoUploading} onChange={(event) => { onPhotoSelect?.(event.target.files?.[0] ?? null, 'gallery'); event.currentTarget.value = '' }} /></label></div>{cameraSupportMessage() && <small className="ibCameraSupportNote">{cameraSupportMessage()} Gunakan Pilih dari Galeri.</small>}{selectedPhotoPreview && <figure className="ibUploadPreview"><img src={selectedPhotoPreview} alt="Preview foto yang akan diupload" /><figcaption>{selectedPhotoName}</figcaption></figure>}<button type="button" disabled={photoUploading || !selectedPhotoName} onClick={onPhotoUpload}>{photoUploading ? <span className="ibUploadSpinner" aria-hidden="true" /> : <Upload />} {photoUploading ? 'Mengupload…' : 'Upload foto'}</button><small aria-live="polite">{photoUploading ? 'Foto sedang dikirim. Jangan tutup halaman ini.' : selectedPhotoName || 'Kamera langsung memerlukan HTTPS dan izin browser. Galeri selalu tersedia. JPG, PNG, atau WebP maksimal 5 MB.'}</small></> : <div className="ibUploadLocked" role="note"><CameraOff aria-hidden="true" /><div><strong>Check-in diperlukan untuk upload foto</strong><span>Album tetap dapat dilihat. Setelah check-in untuk event ini berhasil, buka ulang undangan untuk memakai kamera atau galeri.</span></div></div>}</div>}<GuestPhotoAlbum photos={photos} meta={albumMeta} loading={albumLoading} error={albumError} assetUrl={assetUrl} onPageChange={onAlbumPageChange} /></section>
   }
   return <article className={`invitationRenderer theme-${resolved.theme} ${preview ? 'isPreview' : ''}`}><div className="ibCanvas">{enabled.map(({ id }) => renderSection(id))}<footer>{c.closing_message}<small>Made with Guestory</small></footer></div></article>
 }

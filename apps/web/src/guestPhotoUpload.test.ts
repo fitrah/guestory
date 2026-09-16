@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { guestPhotoInputSemantics } from './InvitationBuilder'
 
 describe('guest photo upload input semantics', () => {
-  it('uses mobile-friendly rear-camera capture semantics', () => {
-    expect(guestPhotoInputSemantics.camera).toEqual({ accept: 'image/*', capture: 'environment' })
+  it('preserves a mobile-friendly capture input only as an explicit fallback', () => {
+    expect(guestPhotoInputSemantics.cameraFallback).toEqual({ accept: 'image/*', capture: 'environment' })
   })
 
   it('keeps gallery selection separate and does not force camera capture', () => {
