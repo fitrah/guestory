@@ -11,6 +11,10 @@ import {
   LifeBuoy,
   LogIn,
   Menu,
+  MoreVertical,
+  Eye,
+  EyeOff,
+  ArrowLeft,
   QrCode,
   RefreshCw,
   Search,
@@ -33,6 +37,7 @@ import './invitation-builder.css'
 import { InvitationBuilderPage, InvitationRenderer, type AlbumMeta, type InvitationConfig } from './InvitationBuilder'
 import { AdminHelpPage, ReceiverHelpPage } from './UserGuide'
 import { likelyMatchQuery, walkInPayload } from './walkIn'
+import { attendanceLabel, categoryCounts, guestCategoriesForEvent, hourlyCheckIns, paginate } from './feedbackUi'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? '/api'
 
@@ -188,6 +193,8 @@ type AdminDashboard = {
     actual_guest_count: number
     checked_in_at?: string
   }[]
+  category_counts?: { category: string; total: number }[]
+  check_in_activity?: { label: string; total: number }[]
 }
 
 type AdminGuest = AdminGuestLite & {
@@ -222,17 +229,6 @@ type AttendanceRow = {
   method?: string | null
   checked_in_time?: string | null
   receiver_name?: string | null
-}
-
-type GuestBookRow = {
-  check_in_id: number
-  guest_name: string
-  walk_in?: boolean
-  category: string
-  actual_guest_count: number
-  method: string
-  checked_in_time?: string
-  receiver_name?: string
 }
 
 type AdminGuestLite = {
@@ -274,6 +270,27 @@ type AdminProfile = {
 }
 
 const emptyGuestForm = { name: '', phone: '', email: '', category: 'Other', guest_count: '1' }
+
+function PasswordField({ value, onChange, autoComplete }: { value: string; onChange: (value: string) => void; autoComplete?: string }) {
+  const [visible, setVisible] = useState(false)
+  return <span className="passwordField"><input type={visible ? 'text' : 'password'} value={value} autoComplete={autoComplete} onChange={(event) => onChange(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && value) event.currentTarget.closest('section')?.querySelector<HTMLButtonElement>('button.primary')?.click() }} /><button type="button" aria-label={visible ? 'Sembunyikan password' : 'Tampilkan password'} aria-pressed={visible} onClick={() => setVisible(!visible)}>{visible ? <EyeOff size={18} /> : <Eye size={18} />}</button></span>
+}
+
+function AuthBackLink() { return <a className="authBack" href="/"><ArrowLeft size={17} /> Kembali</a> }
+
+function AttendanceBadge({ status }: { status?: string }) { return <span className={`attendanceBadge ${status === 'CHECKED_IN' ? 'checked' : 'missing'}`}><i />{attendanceLabel(status)}</span> }
+
+function ActionMenu({ label, children }: { label: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false)
+  return <div className="actionMenu"><button type="button" aria-label={label} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}><MoreVertical size={18} /></button>{open && <div role="menu" onClick={() => setOpen(false)}>{children}</div>}</div>
+}
+
+function Pagination({ page, pages, onPage }: { page: number; pages: number; onPage: (page: number) => void }) { return <nav className="tablePagination" aria-label="Pagination"><button type="button" disabled={page <= 1} onClick={() => onPage(page - 1)}>Prev</button><span>Halaman {page} dari {pages}</span><button type="button" disabled={page >= pages} onClick={() => onPage(page + 1)}>Next</button></nav> }
+
+function BarChart({ title, data }: { title: string; data: { label: string; value: number }[] }) {
+  const max = Math.max(1, ...data.map((item) => item.value))
+  return <article className="chartCard"><h2>{title}</h2><div className="barChart">{data.length ? data.map((item) => <div key={item.label}><span>{item.label}</span><i><b style={{ width: `${Math.max(4, item.value / max * 100)}%` }} /></i><strong>{item.value}</strong></div>) : <p className="emptyState">Belum ada data.</p>}</div></article>
+}
 
 function AdminSidebar({ active }: { active: string }) {
   const [open, setOpen] = useState(false)
@@ -507,6 +524,7 @@ function ForgotPasswordPage() {
   return (
     <main className="adminCmsPage">
       <section className="adminCmsLogin">
+        <AuthBackLink />
         <div className="brandMark">
           <div className="brandGlyph">G</div>
           <div>
@@ -545,12 +563,13 @@ function RegisterPage() {
     } catch { setMessage('Pendaftaran gagal. Coba lagi sebentar.') } finally { setIsSubmitting(false) }
   }
   return <main className="adminCmsPage"><section className="adminCmsLogin accountForm">
+    <AuthBackLink />
     <div className="brandMark"><div className="brandGlyph">G</div><div><strong>Guestory</strong><span>Every Guest Has a Story</span></div></div>
     <div><p className="eyebrow">Event Owner</p><h1>Buat akun Guestory.</h1></div>
     <label>Nama<input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
     <label>Email<input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} /></label>
-    <label>Password<input type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} /></label>
-    <label>Konfirmasi Password<input type="password" value={form.password_confirmation} onChange={(event) => setForm({ ...form, password_confirmation: event.target.value })} /></label>
+    <label>Password<PasswordField value={form.password} onChange={(value) => setForm({ ...form, password: value })} autoComplete="new-password" /></label>
+    <label>Konfirmasi Password<PasswordField value={form.password_confirmation} onChange={(value) => setForm({ ...form, password_confirmation: value })} autoComplete="new-password" /></label>
     <input className="honeypot" tabIndex={-1} autoComplete="off" value={form.website} onChange={(event) => setForm({ ...form, website: event.target.value })} aria-hidden="true" />
     <label className="checkLabel"><input type="checkbox" checked={form.terms_accepted} onChange={(event) => setForm({ ...form, terms_accepted: event.target.checked })} /> Saya menyetujui syarat layanan.</label>
     <label className="checkLabel"><input type="checkbox" checked={form.privacy_accepted} onChange={(event) => setForm({ ...form, privacy_accepted: event.target.checked })} /> Saya menyetujui kebijakan privasi.</label>
@@ -569,9 +588,10 @@ function AccountTokenPage({ mode }: { mode: 'verify' | 'activate' }) {
     const json = await response.json().catch(() => ({})); setMessage(json.message ?? 'Link tidak dapat diproses.'); setDone(response.ok)
   }
   return <main className="adminCmsPage"><section className="adminCmsLogin accountForm">
+    <AuthBackLink />
     <div className="brandMark"><div className="brandGlyph">G</div><div><strong>Guestory</strong><span>Account security</span></div></div>
     <div><p className="eyebrow">{mode === 'verify' ? 'Email Verification' : 'Account Activation'}</p><h1>{mode === 'verify' ? 'Verifikasi email.' : 'Aktifkan akun.'}</h1></div>
-    {mode === 'activate' && <><label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label><label>Konfirmasi Password<input type="password" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} /></label></>}
+    {mode === 'activate' && <><label>Password<PasswordField value={password} onChange={setPassword} autoComplete="current-password" /></label><label>Konfirmasi Password<PasswordField value={confirmation} onChange={setConfirmation} autoComplete="new-password" /></label></>}
     {!done && <button className="primary wideButton" type="button" onClick={submit}><ShieldCheck size={18} /> {mode === 'verify' ? 'Verifikasi Email' : 'Aktifkan Akun'}</button>}
     {done && <a className="landingPrimary" href="/admin">Login Guestory</a>}<p className="statusMessage">{message}</p>
   </section></main>
@@ -641,6 +661,7 @@ function ResetPasswordPage() {
   return (
     <main className="adminCmsPage">
       <section className="adminCmsLogin">
+        <AuthBackLink />
         <div className="brandMark">
           <div className="brandGlyph">G</div>
           <div>
@@ -658,11 +679,11 @@ function ResetPasswordPage() {
         </label>
         <label>
           Password Baru
-          <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} />
+          <PasswordField value={password} onChange={setPassword} autoComplete="current-password" />
         </label>
         <label>
           Konfirmasi Password
-          <input type="password" value={passwordConfirmation} onChange={(event) => setPasswordConfirmation(event.target.value)} />
+          <PasswordField value={passwordConfirmation} onChange={setPasswordConfirmation} autoComplete="new-password" />
         </label>
         <button className="primary wideButton" type="button" onClick={resetPassword} disabled={isSubmitting}>
           <ShieldCheck size={18} />
@@ -841,7 +862,7 @@ function SuperadminUsersPage() {
   async function updateStatus(user: ManagedUser) { try { await api(`/superadmin/users/${user.id}/status`, { method: 'PATCH', body: JSON.stringify({ status: user.status === 'ACTIVE' ? 'SUSPENDED' : 'ACTIVE' }) }); await loadUsers() } catch (error) { setMessage(error instanceof Error ? error.message : 'Update status gagal.') } }
   async function resend(user: ManagedUser) { try { const json = await api(`/superadmin/users/${user.id}/activation/resend`, { method: 'POST' }); setMessage(json.message) } catch (error) { setMessage(error instanceof Error ? error.message : 'Resend gagal.') } }
   useEffect(() => { if (token) loadUsers() }, [loadUsers, token])
-  if (!token) return <main className="adminCmsPage"><section className="adminCmsLogin"><p className="eyebrow">SUPERADMIN</p><h1>Kelola akun owner.</h1><label>Email<input value={email} onChange={(e) => setEmail(e.target.value)} /></label><label>Password<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} /></label><button className="primary" onClick={login}>Login</button><p className="statusMessage">{message}</p></section></main>
+  if (!token) return <main className="adminCmsPage"><section className="adminCmsLogin"><p className="eyebrow">SUPERADMIN</p><h1>Kelola akun owner.</h1><label>Email<input value={email} onChange={(e) => setEmail(e.target.value)} /></label><label>Password<PasswordField value={password} onChange={setPassword} autoComplete="current-password" /></label><button className="primary" onClick={login}>Login</button><p className="statusMessage">{message}</p></section></main>
   return <main className="adminCmsShell"><aside className="sidebar"><div className="brandMark"><div className="brandGlyph">G</div><div><strong>Guestory</strong><span>Platform administration</span></div></div><nav className="navList"><a href="/admin"><LayoutDashboard size={18} /> Event CMS</a><a className="active" href="/superadmin/users"><Users size={18} /> Users</a></nav></aside><section className="workspace"><header className="topbar"><div><p className="eyebrow">SUPERADMIN</p><h1>User management</h1></div><button onClick={loadUsers}><RefreshCw size={18} /> Refresh</button></header><section className="mainGrid"><article className="adminPanel"><h2>Event owners</h2><div className="guestTable"><div className="tableRow tableHead"><span>Owner</span><span>Role</span><span>Status</span><span>Events</span><span>Action</span></div>{users.map((user) => <div className="tableRow" key={user.id}><span><strong>{user.name}</strong><small>{user.email}</small></span><span>{user.role}</span><span>{user.status}</span><span>{user.events_count ?? 0}</span><span>{user.role === 'EVENT_OWNER' && <>{user.status === 'PENDING_ACTIVATION' && <button onClick={() => resend(user)}>Resend</button>}<button onClick={() => updateStatus(user)}>{user.status === 'ACTIVE' ? 'Suspend' : 'Activate'}</button></>}</span></div>)}</div></article><aside className="adminPanel"><h2>Provision owner</h2><label>Nama<input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label><label>Email<input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></label><button className="primary wideButton" onClick={provision}><UserPlus size={18} /> Kirim aktivasi</button><p className="statusMessage">{message}</p></aside></section></section></main>
 }
 
@@ -852,6 +873,7 @@ function AdminReceiversPage() {
   const [receivers, setReceivers] = useState<EventReceiverAssignment[]>([])
   const [form, setForm] = useState({ name: '', email: '', eventIds: [] as number[] })
   const [message, setMessage] = useState('Pilih event untuk mengelola petugas.')
+  const [showReceiverModal, setShowReceiverModal] = useState(false)
   const headers = useMemo(() => ({ Accept: 'application/json', 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }), [token])
 
   const loadReceivers = useCallback(async (eventId: number) => {
@@ -879,6 +901,7 @@ function AdminReceiversPage() {
       const json = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(json.message ?? 'Gagal menambahkan petugas.')
       setForm({ name: '', email: '', eventIds: [] })
+      setShowReceiverModal(false)
       setMessage(json.message)
       await loadReceivers(selectedEventId)
     } catch (error) { setMessage(error instanceof Error ? error.message : 'Gagal menambahkan petugas.') }
@@ -903,7 +926,7 @@ function AdminReceiversPage() {
   useEffect(() => { if (selectedEventId) loadReceivers(selectedEventId).catch((error) => setMessage(error.message)) }, [loadReceivers, selectedEventId])
 
   if (!token) return <main className="adminCmsPage"><section className="adminCmsLogin"><h1>Login melalui Admin CMS</h1><a className="landingPrimary" href="/admin">Buka Admin</a><p>{message}</p></section></main>
-  return <main className="adminCmsShell"><AdminSidebar active="/admin/receivers" /><section className="workspace"><header className="topbar"><div><p className="eyebrow">Admin → Event → Petugas</p><h1>Petugas event</h1><span>Akun dapat bertugas di banyak event tanpa mengubah role pemilik event.</span></div><div className="headerActions"><button type="button" onClick={() => selectedEventId && loadReceivers(selectedEventId)}><RefreshCw size={17} /> Refresh</button><button className="primary" type="button" onClick={() => document.getElementById('receiver-create')?.scrollIntoView({ behavior: 'smooth' })}><UserPlus size={17} /> Tambah Petugas</button></div></header><section className="mainGrid"><article className="adminPanel"><div className="sectionHeader"><div><p className="eyebrow">Assignments</p><h2>Daftar petugas</h2></div><span>{receivers.length} petugas</span></div><div className="dataTable receiverDataTable" role="table" aria-label="Daftar petugas"><div className="dataTableRow dataTableHead" role="row"><span>Petugas</span><span>Role</span><span>Akun</span><span>Assignment</span><span>Aksi</span></div>{receivers.map((receiver) => <div className="dataTableRow" role="row" key={receiver.user_id}><span><strong>{receiver.name}</strong><small>{receiver.email}</small></span><span>{receiver.account_role}</span><span>{receiver.account_status}</span><span>{receiver.assignment_status}</span><div className="tableActions">{receiver.activation_required && <button onClick={() => resendActivation(receiver)}>Resend aktivasi</button>} {receiver.assignment_status === 'ACTIVE' && <button onClick={() => revoke(receiver)}>Cabut akses</button>}</div></div>)}</div>{receivers.length === 0 && <p className="emptyState">Belum ada petugas untuk event ini.</p>}</article><aside className="adminPanel" id="receiver-create"><p className="eyebrow">Invite / assign</p><h2>Tambah petugas</h2><label>Nama (wajib untuk akun baru)<input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label><label>Email<input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></label><fieldset className="eventChecklist"><legend>Tugaskan ke event milik Anda</legend>{events.map((event) => <label key={event.id}><input type="checkbox" checked={form.eventIds.includes(event.id)} onChange={(e) => setForm({ ...form, eventIds: e.target.checked ? [...form.eventIds, event.id] : form.eventIds.filter((id) => id !== event.id) })} /> {event.name}</label>)}</fieldset><button className="primary wideButton" onClick={assignReceiver}><UserPlus size={17} /> Tambah petugas</button><p className="statusMessage">{message}</p></aside></section></section></main>
+  return <main className="adminCmsShell"><AdminSidebar active="/admin/receivers" /><section className="workspace"><header className="topbar"><div><p className="eyebrow">Admin → Event → Petugas</p><h1>Petugas event</h1><span>Akun dapat bertugas di banyak event tanpa mengubah role pemilik event.</span></div><div className="headerActions"><button type="button" onClick={() => selectedEventId && loadReceivers(selectedEventId)}><RefreshCw size={17} /> Refresh</button><button className="primary" type="button" onClick={() => setShowReceiverModal(true)}><UserPlus size={17} /> Tambah Petugas</button></div></header><section className="adminPanel"><div className="sectionHeader"><div><p className="eyebrow">Assignments</p><h2>Daftar petugas <span className="countBadge">{receivers.length}</span></h2></div></div><div className="dataTable receiverDataTable" role="table" aria-label="Daftar petugas"><div className="dataTableRow dataTableHead" role="row"><span>Petugas</span><span>Role</span><span>Akun</span><span>Assignment</span><span>Aksi</span></div>{receivers.map((receiver) => <div className="dataTableRow" role="row" key={receiver.user_id}><span><strong>{receiver.name}</strong><small>{receiver.email}</small></span><span>{receiver.account_role}</span><span>{receiver.account_status}</span><span>{receiver.assignment_status}</span><ActionMenu label={`Aksi ${receiver.name}`}>{receiver.activation_required && <button role="menuitem" onClick={() => resendActivation(receiver)}>Resend aktivasi</button>}{receiver.assignment_status === 'ACTIVE' && <button role="menuitem" onClick={() => revoke(receiver)}>Cabut akses</button>}</ActionMenu></div>)}</div>{receivers.length === 0 && <p className="emptyState">Belum ada petugas untuk event ini.</p>}<Pagination page={1} pages={1} onPage={() => undefined} /></section><p className="statusMessage">{message}</p></section>{showReceiverModal && <Modal title="Tambah petugas" description="Undang akun baru atau tugaskan akun yang ada ke satu atau beberapa event." onClose={() => setShowReceiverModal(false)}><div className="modalForm"><label>Nama (wajib untuk akun baru)<input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label><label>Email<input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} /></label><fieldset className="eventChecklist"><legend>Tugaskan ke event milik Anda</legend>{events.map((event) => <label key={event.id}><input type="checkbox" checked={form.eventIds.includes(event.id)} onChange={(input) => setForm({ ...form, eventIds: input.target.checked ? [...form.eventIds, event.id] : form.eventIds.filter((id) => id !== event.id) })} /> {event.name}</label>)}</fieldset><div className="modalActions"><button type="button" onClick={() => setShowReceiverModal(false)}>Batal</button><button className="primary" type="button" onClick={assignReceiver}><UserPlus size={17} /> Tambah petugas</button></div></div></Modal>}</main>
 }
 
 function AdminCmsApp() {
@@ -916,7 +939,11 @@ function AdminCmsApp() {
   const [dashboard, setDashboard] = useState<AdminDashboard | null>(null)
   const [guests, setGuests] = useState<AdminGuest[]>([])
   const [guestSearch, setGuestSearch] = useState('')
-  const [guestWalkInFilter, setGuestWalkInFilter] = useState('')
+  const [guestCategoryFilter, setGuestCategoryFilter] = useState('')
+  const [eventSearch, setEventSearch] = useState('')
+  const [eventStatusFilter, setEventStatusFilter] = useState('')
+  const [eventPage, setEventPage] = useState(1)
+  const [guestPage, setGuestPage] = useState(1)
   const [guestForm, setGuestForm] = useState(emptyGuestForm)
   const [showGuestModal, setShowGuestModal] = useState(false)
   const [showImportModal, setShowImportModal] = useState(false)
@@ -939,6 +966,10 @@ function AdminCmsApp() {
   const guestQuota = dashboard?.quota
   const importCapacity = guestQuota?.guest_records_remaining ?? 0
   const selectedImportCount = importRows.filter((row) => row.selected).length
+  const guestCategories = guestCategoriesForEvent(selectedEvent?.type)
+  const filteredEvents = events.filter((event) => (!eventSearch || `${event.name} ${event.type ?? ''} ${event.venue_name ?? ''}`.toLowerCase().includes(eventSearch.toLowerCase())) && (!eventStatusFilter || event.status === eventStatusFilter))
+  const eventRows = paginate(filteredEvents, eventPage)
+  const guestRows = paginate(guests, guestPage)
 
   const adminFetch = useCallback(async function adminFetch<T>(path: string, options: RequestInit = {}) {
     const response = await fetch(`${API_BASE}${path}`, {
@@ -1000,7 +1031,7 @@ function AdminCmsApp() {
 
     const query = new URLSearchParams()
     if (guestSearch) query.set('search', guestSearch)
-    if (guestWalkInFilter) query.set('walk_in', guestWalkInFilter)
+    if (guestCategoryFilter) query.set('category', guestCategoryFilter)
 
     try {
       const [dashboardJson, guestJson] = await Promise.all([
@@ -1014,7 +1045,7 @@ function AdminCmsApp() {
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Gagal memuat CMS.')
     }
-  }, [adminFetch, guestSearch, guestWalkInFilter, selectedEventId, token])
+  }, [adminFetch, guestSearch, guestCategoryFilter, selectedEventId, token])
 
   async function readContactFile(file: File | null) {
     if (!file) return
@@ -1260,6 +1291,7 @@ function AdminCmsApp() {
     return (
       <main className="adminCmsPage">
         <section className="adminCmsLogin">
+          <AuthBackLink />
           <div className="brandMark">
             <div className="brandGlyph">G</div>
             <div>
@@ -1277,7 +1309,7 @@ function AdminCmsApp() {
           </label>
           <label>
             Password
-            <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} />
+            <PasswordField value={password} onChange={setPassword} autoComplete="current-password" />
           </label>
           <button className="primary wideButton" type="button" onClick={loginAdmin}>
             <LogIn size={18} />
@@ -1317,16 +1349,18 @@ function AdminCmsApp() {
           <article className="metric rose"><span>Photos</span><strong>{dashboard?.metrics.total_photos ?? 0}</strong></article>
         </section>}
 
-        {pageMode === 'events' && <section className="adminPanel"><div className="sectionHeader"><div><p className="eyebrow">Events</p><h2>Daftar event</h2></div><span>{events.length} event</span></div><div className="dataTable eventTable" role="table" aria-label="Daftar event"><div className="dataTableRow dataTableHead" role="row"><span>Event</span><span>Tanggal</span><span>Status</span><span>Statistik</span><span>Aksi</span></div>{events.map((event) => <div className="dataTableRow" role="row" key={event.id}><span><strong>{event.name}</strong><small>{event.type ?? 'Event'} · {event.venue_name ?? 'Venue belum diatur'}</small></span><span>{event.date ? formatDate(event.date) : '-'}</span><span>{event.status ?? 'Draft'}</span><span>{event.counts?.guests ?? 0} guest · {event.counts?.check_ins ?? 0} hadir · {event.counts?.photos ?? 0} foto</span><div className="tableActions"><button type="button" onClick={() => openEventForm(event)}>Edit</button><button type="button" onClick={() => deleteEvent(event)}>Delete</button><button type="button" disabled={event.status === 'Published'} onClick={() => updateEventStatus('publish', event.id)}>Publish</button><button type="button" disabled={event.status === 'Archived'} onClick={() => updateEventStatus('archive', event.id)}>Archive</button></div></div>)}</div>{events.length === 0 && <p className="emptyState">Belum ada event.</p>}</section>}
+        {pageMode === 'overview' && <section className="overviewCharts"><BarChart title="Check-in Activity" data={dashboard?.check_in_activity?.map((item) => ({ label: item.label, value: item.total })) ?? hourlyCheckIns(dashboard?.recent_check_ins ?? [])} /><BarChart title="Guests by Category" data={dashboard?.category_counts?.map((item) => ({ label: item.category, value: item.total })) ?? categoryCounts(guests)} /></section>}
 
-        {pageMode === 'guests' && <section className="adminPanel"><div className="sectionHeader"><div><p className="eyebrow">Guests</p><h2>Tamu {selectedEvent?.name ?? ''}</h2></div><div className="inlineActions"><input value={guestSearch} onChange={(event) => setGuestSearch(event.target.value)} placeholder="Search guest" /><select aria-label="Filter tipe tamu" value={guestWalkInFilter} onChange={(event) => setGuestWalkInFilter(event.target.value)}><option value="">Semua tipe</option><option value="0">Undangan normal</option><option value="1">Walk-in</option></select><button type="button" onClick={() => loadEventWorkspace()}><Search size={17} /> Search</button><label className="buttonLike"><Upload size={17} /> Import kontak<input className="visuallyHidden" type="file" accept=".csv,.vcf,text/csv,text/vcard" onChange={(event) => { void readContactFile(event.target.files?.[0] ?? null); event.target.value = '' }} /></label></div></div><div className="dataTable guestDataTable" role="table" aria-label="Daftar tamu"><div className="dataTableRow dataTableHead" role="row"><span>Tamu</span><span>RSVP</span><span>Attendance</span><span>Invitation</span><span>QR</span><span>Aksi</span></div>{guests.map((guest) => <div className="dataTableRow" role="row" key={guest.id}><span><strong>{guest.name} {guest.walk_in ? <em className="walkInBadge">WALK-IN</em> : null}</strong><small>{guest.guest_code} · {guest.category ?? 'Other'} · {guest.guest_count} tamu</small></span><span>{guest.rsvp_status}</span><span>{guest.attendance_status}</span><span>{guest.invitation_status}</span><span>{guest.qr?.status ?? 'NO_QR'}</span><div className="tableActions"><button type="button" onClick={() => openGuestForm(guest)}>Edit</button><button type="button" onClick={() => deleteGuest(guest)}>Delete</button><button type="button" onClick={() => generateInvitation(guest.id)}>Invite</button><button type="button" onClick={() => generateQr(guest.id, Boolean(guest.qr?.token))}>{guest.qr?.token ? 'Regen QR' : 'QR'}</button><button type="button" onClick={() => downloadQr(guest)}>SVG</button></div></div>)}</div>{guests.length === 0 && <p className="emptyState">Belum ada tamu untuk filter ini.</p>}</section>}
+        {pageMode === 'events' && <section className="adminPanel"><div className="sectionHeader"><div><p className="eyebrow">Events</p><h2>Daftar Event <span className="countBadge">{filteredEvents.length}</span></h2></div></div><div className="tableToolbar"><input type="search" value={eventSearch} onChange={(event) => { setEventSearch(event.target.value); setEventPage(1) }} placeholder="Cari event" aria-label="Cari event" /><select value={eventStatusFilter} onChange={(event) => { setEventStatusFilter(event.target.value); setEventPage(1) }} aria-label="Filter status event"><option value="">Semua status</option><option value="Published">Published</option><option value="Archived">Archived</option></select></div><div className="dataTable eventTable" role="table" aria-label="Daftar event"><div className="dataTableRow dataTableHead" role="row"><span>Event</span><span>Tanggal</span><span>Status</span><span>Statistik</span><span>Aksi</span></div>{eventRows.items.map((event) => <div className={`dataTableRow ${event.id === selectedEventId ? 'currentRow' : ''}`} role="row" key={event.id}><span><strong>{event.name} {event.id === selectedEventId && <em className="currentEvent"><i />Current event</em>}</strong><small>{event.type ?? 'Event'} · {event.venue_name ?? 'Venue belum diatur'}</small></span><span>{event.date ? formatDate(event.date) : '-'}</span><span>{event.status ?? 'Draft'}</span><span>{event.counts?.guests ?? 0} guest · {event.counts?.check_ins ?? 0} hadir · {event.counts?.photos ?? 0} foto</span><ActionMenu label={`Aksi ${event.name}`}><button role="menuitem" onClick={() => openEventForm(event)}>Edit</button><button role="menuitem" onClick={() => deleteEvent(event)}>Delete</button><button role="menuitem" disabled={event.status === 'Published'} onClick={() => updateEventStatus('publish', event.id)}>Publish</button><button role="menuitem" disabled={event.status === 'Archived'} onClick={() => updateEventStatus('archive', event.id)}>Archive</button></ActionMenu></div>)}</div>{filteredEvents.length === 0 && <p className="emptyState">Belum ada event untuk filter ini.</p>}<Pagination page={eventRows.current} pages={eventRows.pages} onPage={setEventPage} /></section>}
 
-        {pageMode === 'overview' && <section className="overviewTables"><section className="adminPanel"><div className="sectionHeader"><div><p className="eyebrow">Latest Events</p><h2>5 event terbaru</h2></div><a className="textLink" href="/admin/events">Lihat semua</a></div><div className="dataTable overviewTable"><div className="dataTableRow dataTableHead"><span>Event</span><span>Tanggal</span><span>Status</span><span>Aksi</span></div>{[...events].sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? '')).slice(0, 5).map((event) => <div className="dataTableRow" key={event.id}><span><strong>{event.name}</strong><small>{event.type ?? 'Event'}</small></span><span>{event.date ? formatDate(event.date) : '-'}</span><span>{event.status ?? 'Draft'}</span><div className="tableActions"><a href="/admin/events">Kelola</a></div></div>)}</div></section><section className="adminPanel"><div className="sectionHeader"><div><p className="eyebrow">Latest Guests</p><h2>5 tamu terbaru</h2></div><a className="textLink" href="/admin/guests">Lihat semua</a></div><div className="dataTable overviewTable"><div className="dataTableRow dataTableHead"><span>Tamu</span><span>RSVP</span><span>Attendance</span><span>Aksi</span></div>{[...guests].sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? '')).slice(0, 5).map((guest) => <div className="dataTableRow" key={guest.id}><span><strong>{guest.name}</strong><small>{guest.guest_code}</small></span><span>{guest.rsvp_status}</span><span>{guest.attendance_status}</span><div className="tableActions"><a href="/admin/guests">Kelola</a></div></div>)}</div></section></section>}
+        {pageMode === 'guests' && <section className="adminPanel"><div className="sectionHeader"><div><p className="eyebrow">Guests</p><h2>Tamu <span className="countBadge">{guests.length}</span></h2></div></div><div className="tableToolbar"><input type="search" value={guestSearch} onChange={(event) => { setGuestSearch(event.target.value); setGuestPage(1) }} placeholder="Cari tamu" aria-label="Cari tamu" /><select aria-label="Filter kategori" value={guestCategoryFilter} onChange={(event) => { setGuestCategoryFilter(event.target.value); setGuestPage(1) }}><option value="">Semua kategori</option>{guestCategories.map((item) => <option key={item}>{item}</option>)}</select><label className="buttonLike toolbarEnd"><Upload size={17} /> Import kontak<input className="visuallyHidden" type="file" accept=".csv,.vcf,text/csv,text/vcard" onChange={(event) => { void readContactFile(event.target.files?.[0] ?? null); event.target.value = '' }} /></label></div><div className="dataTable guestDataTable" role="table" aria-label="Daftar tamu"><div className="dataTableRow dataTableHead" role="row"><span>Tamu</span><span>RSVP</span><span>Attendance</span><span>Invitation</span><span>QR</span><span>Aksi</span></div>{guestRows.items.map((guest) => <div className="dataTableRow" role="row" key={guest.id}><span><strong>{guest.name} {guest.walk_in ? <em className="walkInBadge">WALK-IN</em> : null}</strong><small>{guest.guest_code} · {guest.category ?? 'Other'} · {guest.guest_count} tamu</small></span><span>{guest.rsvp_status}</span><AttendanceBadge status={guest.attendance_status} /><span>{guest.invitation_status}</span><span>{guest.qr?.status ?? 'NO_QR'}</span><ActionMenu label={`Aksi ${guest.name}`}><button role="menuitem" onClick={() => openGuestForm(guest)}>Edit</button><button role="menuitem" onClick={() => deleteGuest(guest)}>Delete</button><button role="menuitem" onClick={() => generateInvitation(guest.id)}>Invite</button><button role="menuitem" onClick={() => generateQr(guest.id, Boolean(guest.qr?.token))}>{guest.qr?.token ? 'Regen QR' : 'QR'}</button><button role="menuitem" onClick={() => downloadQr(guest)}>Download SVG</button></ActionMenu></div>)}</div>{guests.length === 0 && <p className="emptyState">Belum ada tamu untuk filter ini.</p>}<Pagination page={guestRows.current} pages={guestRows.pages} onPage={setGuestPage} /></section>}
+
+        {pageMode === 'overview' && <section className="overviewTables"><section className="adminPanel"><div className="sectionHeader"><div><p className="eyebrow">Latest Events</p><h2>Event Terbaru</h2></div><a className="textLink" href="/admin/events">Lihat semua</a></div><div className="dataTable overviewTable"><div className="dataTableRow dataTableHead"><span>Event</span><span>Tanggal</span><span>Status</span><span>Aksi</span></div>{[...events].sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? '')).slice(0, 5).map((event) => <div className="dataTableRow" key={event.id}><span><strong>{event.name}</strong><small>{event.type ?? 'Event'}</small></span><span>{event.date ? formatDate(event.date) : '-'}</span><span>{event.status ?? 'Draft'}</span><div className="tableActions"><a href="/admin/events">Kelola</a></div></div>)}</div></section><section className="adminPanel"><div className="sectionHeader"><div><p className="eyebrow">Latest Guests</p><h2>Tamu Terbaru</h2></div><a className="textLink" href="/admin/guests">Lihat semua</a></div><div className="dataTable overviewTable"><div className="dataTableRow dataTableHead"><span>Tamu</span><span>RSVP</span><span>Attendance</span><span>Aksi</span></div>{[...guests].sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? '')).slice(0, 5).map((guest) => <div className="dataTableRow" key={guest.id}><span><strong>{guest.name}</strong><small>{guest.guest_code}</small></span><span>{guest.rsvp_status}</span><AttendanceBadge status={guest.attendance_status} /><ActionMenu label={`Aksi ${guest.name}`}><a role="menuitem" href="/admin/guests">Kelola</a></ActionMenu></div>)}</div></section></section>}
 
         <p className="statusMessage">{message}</p>
       </section>
-      {showImportModal && <Modal title="Import kontak" description={`Tinjau ${importFilename}. Pilih dan edit kontak sebelum ditambahkan; proses ini tidak mengirim invitation atau WhatsApp.`} onClose={() => !importBusy && setShowImportModal(false)}><div className="contactImport"><div className="quotaSummary"><strong>Paket {guestQuota?.plan_code ?? '-'}</strong><span>{guestQuota?.guest_records_used ?? 0} / {guestQuota?.guest_limit ?? 0} guest record terpakai</span><span>{importCapacity} slot tersisa</span><small>Quota dihitung per guest record, bukan jumlah pax.</small></div><div className="importSummary"><strong aria-live="polite">{selectedImportCount} dipilih</strong><span>{importRows.filter((row) => row.errors.length).length} tidak valid · {importRows.filter((row) => row.duplicate).length} duplikat</span><label><input type="checkbox" checked={importRows.length > 0 && importRows.every((row) => row.selected)} disabled={importCapacity === 0} onChange={(event) => toggleAllImportRows(event.target.checked)} /> Pilih semua yang muat quota</label></div><div className="contactPreview">{importRows.map((row, index) => <article className={row.errors.length || row.duplicate ? 'hasError' : ''} key={row.id}><label className="contactSelect"><input type="checkbox" checked={row.selected} disabled={!row.selected && selectedImportCount >= importCapacity} onChange={(event) => toggleImportRow(row.id, event.target.checked)} /><span>Kontak {index + 1}</span></label><div className="contactFields"><label>Nama<input value={row.name} onChange={(event) => updateImportRow(row.id, { name: event.target.value })} /></label><label>WhatsApp<input inputMode="tel" value={row.phone} onChange={(event) => updateImportRow(row.id, { phone: event.target.value })} placeholder="081234567890" /></label><label>Email<input type="email" value={row.email} onChange={(event) => updateImportRow(row.id, { email: event.target.value })} /></label><label>Kategori<select value={row.category} onChange={(event) => updateImportRow(row.id, { category: event.target.value })}>{['Family','Friend','Colleague','VIP','Other'].map((item) => <option key={item}>{item}</option>)}</select></label><label>Jumlah<input min={1} max={20} type="number" value={row.guest_count} onChange={(event) => updateImportRow(row.id, { guest_count: Number(event.target.value) })} /></label></div>{row.duplicate && <p className="rowError">{row.duplicate}</p>}{row.errors.map((error) => <p className="rowError" key={error}>{error}</p>)}</article>)}</div>{importRows.length === 0 && <p>Tidak ada kontak yang terbaca. CSV harus memiliki header nama/name dan phone/whatsapp atau email.</p>}{importCapacity === 0 && <p className="rowError">Quota guest paket ini sudah penuh. Hapus guest atau upgrade paket sebelum mengimpor.</p>}<div className="modalActions"><button type="button" disabled={importBusy} onClick={() => setShowImportModal(false)}>Batal</button><button className="primary" type="button" disabled={importBusy || selectedImportCount === 0 || selectedImportCount > importCapacity || importRows.filter((row) => row.selected).some((row) => row.errors.length || row.duplicate)} onClick={importContacts}>{importBusy ? 'Mengimpor…' : 'Tambahkan ke guest list'}</button></div></div></Modal>}
-      {showGuestModal && <Modal title={editingGuest ? 'Edit Guest' : 'Add Guest'} description="Isi identitas tamu dan jumlah orang dalam undangan." onClose={() => setShowGuestModal(false)}><div className="modalForm"><label>Nama lengkap<input autoFocus value={guestForm.name} onChange={(event) => setGuestForm({ ...guestForm, name: event.target.value })} /></label><label>WhatsApp<div className="phoneInput"><span>+62</span><input inputMode="numeric" value={guestForm.phone} onChange={(event) => setGuestForm({ ...guestForm, phone: event.target.value.replace(/\D/g, '') })} placeholder="81234567890" /></div><small>Masukkan nomor lokal tanpa angka 0 di depan.</small></label><label>Email (opsional)<input type="email" value={guestForm.email} onChange={(event) => setGuestForm({ ...guestForm, email: event.target.value })} /></label><label>Kategori<select value={guestForm.category} onChange={(event) => setGuestForm({ ...guestForm, category: event.target.value })}>{['Family','Friend','Colleague','VIP','Other'].map((item) => <option key={item}>{item}</option>)}</select></label><label>Jumlah tamu<input min={1} max={20} type="number" value={guestForm.guest_count} onChange={(event) => setGuestForm({ ...guestForm, guest_count: event.target.value })} /></label><div className="modalActions"><button type="button" onClick={() => setShowGuestModal(false)}>Batal</button><button className="primary" type="button" onClick={editingGuest ? saveGuest : createGuest}>{editingGuest ? 'Simpan Perubahan' : 'Tambah Tamu'}</button></div></div></Modal>}
+      {showImportModal && <Modal title="Import kontak" description={`Tinjau ${importFilename}. Pilih dan edit kontak sebelum ditambahkan; proses ini tidak mengirim invitation atau WhatsApp.`} onClose={() => !importBusy && setShowImportModal(false)}><div className="contactImport"><div className="quotaSummary"><strong>Paket {guestQuota?.plan_code ?? '-'}</strong><span>{guestQuota?.guest_records_used ?? 0} / {guestQuota?.guest_limit ?? 0} guest record terpakai</span><span>{importCapacity} slot tersisa</span><small>Quota dihitung per guest record, bukan jumlah pax.</small></div><div className="importSummary"><strong aria-live="polite">{selectedImportCount} dipilih</strong><span>{importRows.filter((row) => row.errors.length).length} tidak valid · {importRows.filter((row) => row.duplicate).length} duplikat</span><label><input type="checkbox" checked={importRows.length > 0 && importRows.every((row) => row.selected)} disabled={importCapacity === 0} onChange={(event) => toggleAllImportRows(event.target.checked)} /> Pilih semua yang muat quota</label></div><div className="contactPreview">{importRows.map((row, index) => <article className={row.errors.length || row.duplicate ? 'hasError' : ''} key={row.id}><label className="contactSelect"><input type="checkbox" checked={row.selected} disabled={!row.selected && selectedImportCount >= importCapacity} onChange={(event) => toggleImportRow(row.id, event.target.checked)} /><span>Kontak {index + 1}</span></label><div className="contactFields"><label>Nama<input value={row.name} onChange={(event) => updateImportRow(row.id, { name: event.target.value })} /></label><label>WhatsApp<input inputMode="tel" value={row.phone} onChange={(event) => updateImportRow(row.id, { phone: event.target.value })} placeholder="081234567890" /></label><label>Email<input type="email" value={row.email} onChange={(event) => updateImportRow(row.id, { email: event.target.value })} /></label><label>Kategori<select value={row.category} onChange={(event) => updateImportRow(row.id, { category: event.target.value })}>{guestCategories.map((item) => <option key={item}>{item}</option>)}</select></label><label>Jumlah<input min={1} max={20} type="number" value={row.guest_count} onChange={(event) => updateImportRow(row.id, { guest_count: Number(event.target.value) })} /></label></div>{row.duplicate && <p className="rowError">{row.duplicate}</p>}{row.errors.map((error) => <p className="rowError" key={error}>{error}</p>)}</article>)}</div>{importRows.length === 0 && <p>Tidak ada kontak yang terbaca. CSV harus memiliki header nama/name dan phone/whatsapp atau email.</p>}{importCapacity === 0 && <p className="rowError">Quota guest paket ini sudah penuh. Hapus guest atau upgrade paket sebelum mengimpor.</p>}<div className="modalActions"><button type="button" disabled={importBusy} onClick={() => setShowImportModal(false)}>Batal</button><button className="primary" type="button" disabled={importBusy || selectedImportCount === 0 || selectedImportCount > importCapacity || importRows.filter((row) => row.selected).some((row) => row.errors.length || row.duplicate)} onClick={importContacts}>{importBusy ? 'Mengimpor…' : 'Tambahkan ke guest list'}</button></div></div></Modal>}
+      {showGuestModal && <Modal title={editingGuest ? 'Edit Guest' : 'Add Guest'} description="Isi identitas tamu dan jumlah orang dalam undangan." onClose={() => setShowGuestModal(false)}><div className="modalForm"><label>Nama lengkap<input autoFocus value={guestForm.name} onChange={(event) => setGuestForm({ ...guestForm, name: event.target.value })} /></label><label>WhatsApp<div className="phoneInput"><span>+62</span><input inputMode="numeric" value={guestForm.phone} onChange={(event) => setGuestForm({ ...guestForm, phone: event.target.value.replace(/\D/g, '') })} placeholder="81234567890" /></div><small>Masukkan nomor lokal tanpa angka 0 di depan.</small></label><label>Email (opsional)<input type="email" value={guestForm.email} onChange={(event) => setGuestForm({ ...guestForm, email: event.target.value })} /></label><label>Kategori<select value={guestForm.category} onChange={(event) => setGuestForm({ ...guestForm, category: event.target.value })}>{guestCategories.map((item) => <option key={item}>{item}</option>)}</select></label><label>Jumlah tamu<input min={1} max={20} type="number" value={guestForm.guest_count} onChange={(event) => setGuestForm({ ...guestForm, guest_count: event.target.value })} /></label><div className="modalActions"><button type="button" onClick={() => setShowGuestModal(false)}>Batal</button><button className="primary" type="button" onClick={editingGuest ? saveGuest : createGuest}>{editingGuest ? 'Simpan Perubahan' : 'Tambah Tamu'}</button></div></div></Modal>}
       {showEventModal && <Modal title={editingEvent ? "Edit Event" : "Create Event"} description="Lengkapi detail dan pilih lifecycle event." onClose={() => setShowEventModal(false)}><div className="modalForm"><label>Nama event<input autoFocus value={eventForm.name} onChange={(event) => setEventForm({ ...eventForm, name: event.target.value })} /></label><label>Tanggal<input type="date" value={eventForm.date} onChange={(event) => setEventForm({ ...eventForm, date: event.target.value })} /></label><label>Jenis<select value={eventForm.type} onChange={(event) => setEventForm({ ...eventForm, type: event.target.value })}>{['Wedding','Birthday','Engagement','Corporate','Gathering','Other'].map((item) => <option key={item}>{item}</option>)}</select></label><label>Venue (opsional)<input value={eventForm.venue_name} onChange={(event) => setEventForm({ ...eventForm, venue_name: event.target.value })} /></label><label>Lifecycle<select value={eventForm.status} onChange={(event) => setEventForm({ ...eventForm, status: event.target.value })}><option value="Published">Publish</option><option value="Archived">Archive</option></select></label><div className="modalActions"><button type="button" onClick={() => { setShowEventModal(false); setEditingEvent(null) }}>Batal</button><button className="primary" type="button" onClick={editingEvent ? saveEvent : createEvent}>{editingEvent ? 'Simpan Perubahan' : 'Buat Event'}</button></div></div></Modal>}
     </main>
   )
@@ -1365,6 +1399,7 @@ function AdminBillingPage() {
   const [billing, setBilling] = useState<EventBilling | null>(null)
   const [message, setMessage] = useState('Pilih event dan paket untuk mengaktifkan entitlement.')
   const [busy, setBusy] = useState(false)
+  const [pendingPlan, setPendingPlan] = useState<BillingPlan | null>(null)
   const selectedEvent = events.find((event) => event.id === selectedEventId)
 
   const headers = useMemo(() => ({ Accept: 'application/json', 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }), [token])
@@ -1452,9 +1487,9 @@ function AdminBillingPage() {
       <AdminSidebar active="/admin/billing" />
       <section className="workspace">
         <header className="topbar"><div><p className="eyebrow">Per-event Billing</p><h1>{selectedEvent?.name ?? 'Pilih event'}</h1><span>Plan dan pembayaran terpisah dari lifecycle event.</span></div><div className="headerActions"><button type="button" onClick={syncStatus} disabled={!billing?.order_id || busy}><RefreshCw size={17} /> Sync status</button></div></header>
-        <section className="billingStatus adminPanel"><div><p className="eyebrow">Current entitlement</p><h2>{billing ? `${billing.plan_code} · ${billing.status}` : 'Belum ada paket'}</h2></div>{billing?.order_id ? <span>Order {billing.order_id}</span> : null}</section>
+        <section className="billingStatus adminPanel"><div><p className="eyebrow">Current entitlement</p><h2>{pendingPlan ? `${pendingPlan.name} dipilih` : billing ? `${billing.plan_code} · ${billing.status}` : 'Belum ada paket'}</h2>{billing?.order_id ? <span>Order {billing.order_id}</span> : null}</div>{pendingPlan && <div className="billingSelectionActions"><button type="button" onClick={() => setPendingPlan(null)}>Cancel</button><button className="primary" type="button" onClick={() => { const plan = pendingPlan; setPendingPlan(null); void selectPlan(plan) }}>Lanjutkan</button></div>}</section>
         <section className="billingPlans">
-          {plans.map((plan) => <article className={`billingPlan ${plan.popular ? 'popular' : ''}`} key={plan.code}>{plan.popular ? <span className="popularBadge">POPULAR</span> : null}<p className="eyebrow">{plan.name}</p><h2>{plan.amount === 0 ? 'Rp0' : `Rp${plan.amount.toLocaleString('id-ID')}`}<small>/event</small></h2><ul><li>{plan.guest_limit.toLocaleString('id-ID')} guests</li><li>{plan.photo_limit.toLocaleString('id-ID')} photos</li><li>Retention {plan.retention_days} hari</li><li>{plan.zip_download ? 'ZIP download' : 'Single-photo download'}</li><li>{plan.google_photos ? 'Google Photos entitlement' : 'Tanpa Google Photos'}</li><li>{plan.staff_limit} staff</li><li>{plan.branding === 'NONE' ? 'Tanpa branding' : plan.branding === 'SMALL' ? 'Small branding' : 'Guestory branded'}</li></ul><button className="primary wideButton" type="button" disabled={!selectedEventId || busy || (billing?.plan_code === plan.code && ['ACTIVE', 'PAID'].includes(billing.status))} onClick={() => selectPlan(plan)}>{billing?.plan_code === plan.code && ['ACTIVE', 'PAID'].includes(billing.status) ? 'Paket aktif' : plan.code === 'FREE' ? 'Aktifkan FREE' : `Pilih ${plan.name}`}</button></article>)}
+          {plans.map((plan) => { const current = billing?.plan_code === plan.code && ['ACTIVE', 'PAID'].includes(billing.status); return <article className={`billingPlan ${current ? 'current' : ''}`} key={plan.code}>{current ? <span className="popularBadge">CURRENT PLAN</span> : plan.popular ? <span className="popularBadge muted">POPULAR</span> : null}<p className="eyebrow">{plan.name}</p><h2>{plan.amount === 0 ? 'Rp0' : `Rp${plan.amount.toLocaleString('id-ID')}`}<small>/event</small></h2><ul><li>{plan.guest_limit.toLocaleString('id-ID')} guests</li><li>{plan.photo_limit.toLocaleString('id-ID')} photos</li><li>Retention {plan.retention_days} hari</li><li>{plan.zip_download ? 'ZIP download' : 'Single-photo download'}</li><li>{plan.google_photos ? 'Google Photos entitlement' : 'Tanpa Google Photos'}</li><li>{plan.staff_limit} staff</li><li>{plan.branding === 'NONE' ? 'Tanpa branding' : plan.branding === 'SMALL' ? 'Small branding' : 'Guestory branded'}</li></ul><button className="primary wideButton" type="button" disabled={!selectedEventId || busy || (billing?.plan_code === plan.code && ['ACTIVE', 'PAID'].includes(billing.status))} onClick={() => setPendingPlan(plan)}>{current ? 'Paket aktif' : plan.code === 'FREE' ? 'Pilih FREE' : `Pilih ${plan.name}`}</button></article> })}
         </section>
         <p className="statusMessage">{message}</p>
       </section>
@@ -1469,7 +1504,6 @@ function AdminAttendancePage() {
   const [events, setEvents] = useState<AdminEventLite[]>([])
   const [selectedEventId, setSelectedEventId] = useSelectedEventId()
   const [attendance, setAttendance] = useState<AttendanceRow[]>([])
-  const [guestBook, setGuestBook] = useState<GuestBookRow[]>([])
   const [statusFilter, setStatusFilter] = useState('')
   const [attendanceWalkInFilter, setAttendanceWalkInFilter] = useState('')
   const [attendanceSummary, setAttendanceSummary] = useState<{ walk_in_records?: number; walk_in_checked_in?: number } | null>(null)
@@ -1555,12 +1589,8 @@ function AdminAttendancePage() {
       if (attendanceWalkInFilter) query.set('walk_in', attendanceWalkInFilter)
 
       const headers = { Accept: 'application/json', Authorization: `Bearer ${token}` }
-      const [attendanceResponse, guestBookResponse] = await Promise.all([
-        fetch(`${API_BASE}/admin/events/${selectedEventId}/attendance?${query.toString()}`, { headers }),
-        fetch(`${API_BASE}/admin/events/${selectedEventId}/guest-book`, { headers }),
-      ])
+      const attendanceResponse = await fetch(`${API_BASE}/admin/events/${selectedEventId}/attendance?${query.toString()}`, { headers })
       const attendanceJson = await attendanceResponse.json()
-      const guestBookJson = await guestBookResponse.json()
 
       if (cancelled) return
 
@@ -1571,7 +1601,6 @@ function AdminAttendancePage() {
 
       setAttendance(attendanceJson.attendance ?? [])
       setAttendanceSummary(attendanceJson.summary ?? null)
-      setGuestBook(guestBookJson.guest_book ?? [])
       setMessage('Attendance terupdate dari database.')
     }
 
@@ -1588,6 +1617,7 @@ function AdminAttendancePage() {
     return (
       <main className="adminAttendancePage">
         <section className="receiverLogin">
+          <AuthBackLink />
           <div>
             <p className="eyebrow">Guestory Admin</p>
             <h1>Attendance</h1>
@@ -1599,7 +1629,7 @@ function AdminAttendancePage() {
           </label>
           <label>
             Password
-            <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} />
+            <PasswordField value={password} onChange={setPassword} autoComplete="current-password" />
           </label>
           <button className="primary wideButton" type="button" onClick={loginAdmin}>
             <LogIn size={18} />
@@ -1622,26 +1652,7 @@ function AdminAttendancePage() {
         </div>
       </header>
 
-      <section className="attendanceToolbar">
-        <label>
-          Event
-
-        </label>
-        <label>
-          Attendance
-          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
-            <option value="">All</option>
-            <option value="CHECKED_IN">Checked In</option>
-            <option value="NOT_CHECKED_IN">Not Checked In</option>
-          </select>
-        </label>
-        <label>Tipe tamu<select value={attendanceWalkInFilter} onChange={(event) => setAttendanceWalkInFilter(event.target.value)}><option value="">Semua</option><option value="0">Undangan normal</option><option value="1">Walk-in</option></select></label>
-        <span><strong>{attendanceSummary?.walk_in_records ?? 0}</strong> walk-in record · <strong>{attendanceSummary?.walk_in_checked_in ?? 0}</strong> pax</span>
-        <button className="downloadLink" type="button" onClick={downloadAttendance}>
-          <Download size={18} />
-          Export CSV
-        </button>
-      </section>
+      <section className="tableToolbar"><select aria-label="Filter attendance" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="">Semua attendance</option><option value="CHECKED_IN">Checked In</option><option value="NOT_CHECKED_IN">Not Checked In</option></select><select aria-label="Filter tipe tamu" value={attendanceWalkInFilter} onChange={(event) => setAttendanceWalkInFilter(event.target.value)}><option value="">Semua tipe</option><option value="0">Undangan normal</option><option value="1">Walk-in</option></select><span><strong>{attendanceSummary?.walk_in_records ?? 0}</strong> walk-in · <strong>{attendanceSummary?.walk_in_checked_in ?? 0}</strong> pax</span><button className="downloadLink toolbarEnd" type="button" onClick={downloadAttendance}><Download size={18} /> Export CSV</button></section>
 
       <section className="attendanceGrid">
         <div className="attendancePanel">
@@ -1659,7 +1670,7 @@ function AdminAttendancePage() {
                 <span><strong>{row.name} {row.walk_in ? <em className="walkInBadge">WALK-IN</em> : null}</strong></span>
                 <span>{row.category}</span>
                 <span>{row.rsvp_status}</span>
-                <em>{row.attendance_status}</em>
+                <AttendanceBadge status={row.attendance_status} />
                 <span>{row.method ?? '-'}</span>
                 <span>{row.checked_in_time ?? '-'}</span>
               </div>
@@ -1667,24 +1678,6 @@ function AdminAttendancePage() {
           </div>
         </div>
 
-        <div className="guestBookPanel">
-          <div className="sectionHeader">
-            <div>
-              <p className="eyebrow">Guest Book</p>
-              <h2>Checked-in guests</h2>
-            </div>
-            <BookOpenCheck size={18} />
-          </div>
-          {guestBook.map((row) => (
-            <div key={row.check_in_id}>
-              <Clock3 size={16} />
-              <span>{row.checked_in_time ?? '-'}</span>
-              <strong>{row.guest_name} {row.walk_in ? <em className="walkInBadge">WALK-IN</em> : null}</strong>
-              <em>{row.method}</em>
-            </div>
-          ))}
-          {guestBook.length === 0 ? <p>Belum ada check-in.</p> : null}
-        </div>
       </section>
 
       <p className="statusMessage">{message}</p>
@@ -1829,7 +1822,7 @@ function AdminWhatsAppPage() {
           <p className="eyebrow">WhatsApp Automation</p>
           <h1>Kirim undangan via WAPI</h1>
           <input value={email} onChange={(event) => setEmail(event.target.value)} />
-          <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} />
+          <PasswordField value={password} onChange={setPassword} autoComplete="current-password" />
           <button className="primary" type="button" onClick={loginAdmin}>
             <LogIn size={18} />
             Login Admin
@@ -1892,6 +1885,7 @@ function AdminWhatsAppPage() {
           ))}
           {logs.length === 0 ? <p>Belum ada log WhatsApp.</p> : null}
         </div>
+        <Pagination page={1} pages={1} onPage={() => undefined} />
       </section>
 
       <p className="statusMessage">{message}</p>
@@ -2012,7 +2006,7 @@ function AdminPhotosPage() {
           <p className="eyebrow">Admin Photos</p>
           <h1>Kelola album Guestory</h1>
           <input value={email} onChange={(event) => setEmail(event.target.value)} />
-          <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} />
+          <PasswordField value={password} onChange={setPassword} autoComplete="current-password" />
           <button className="primary" type="button" onClick={loginAdmin}>
             <LogIn size={18} />
             Login Admin
@@ -2030,8 +2024,8 @@ function AdminPhotosPage() {
         <div>
           <p className="eyebrow">Guestory Photos</p>
           <h1>Photo album management</h1>
-          <p>{selectedEvent?.name ?? 'Pilih event untuk mengelola foto tamu.'}</p>
-        </div>
+          <p>{selectedEvent?.date ? formatDate(selectedEvent.date) : 'Pilih event'}</p>
+        </div><button type="button" onClick={loadPhotos}><RefreshCw size={18} /> Refresh</button>
       </section>
 
       <section className="attendanceControls">
@@ -2044,10 +2038,7 @@ function AdminPhotosPage() {
             <option value="REJECTED">Rejected</option>
           </select>
         </label>
-        <button type="button" onClick={loadPhotos}>
-          <RefreshCw size={18} />
-          Refresh
-        </button>
+
       </section>
 
       <section className="photoSummary">
@@ -2078,11 +2069,7 @@ function AdminPhotosPage() {
               <span>{photo.file_url ? <img className="tableThumbnail" src={absoluteAssetUrl(photo.file_url)} alt={photo.guest_name ?? 'Guestory photo'} /> : '-'}</span>
               <span><strong>{photo.guest?.name ?? photo.guest_name ?? 'Guestory'}</strong><small>{photo.guest?.guest_code ?? 'No guest code'}</small></span>
               <span>{photo.status}</span>
-              <div className="tableActions">
-                <button type="button" onClick={() => updatePhoto(photo.id, 'approve')}><CheckCircle2 size={16} /> Approve</button>
-                <button type="button" onClick={() => updatePhoto(photo.id, 'reject')}><XCircle size={16} /> Reject</button>
-                <button type="button" onClick={() => updatePhoto(photo.id, 'delete')}><Trash2 size={16} /> Delete</button>
-              </div>
+              <ActionMenu label={`Aksi foto ${photo.id}`}><button role="menuitem" onClick={() => updatePhoto(photo.id, 'approve')}><CheckCircle2 size={16} /> Approve</button><button role="menuitem" onClick={() => updatePhoto(photo.id, 'reject')}><XCircle size={16} /> Reject</button><button role="menuitem" onClick={() => updatePhoto(photo.id, 'delete')}><Trash2 size={16} /> Delete</button></ActionMenu>
             </div>
           ))}
         </div>
@@ -2115,6 +2102,8 @@ function ReceiverCheckInApp() {
   const [walkInResult, setWalkInResult] = useState<WalkInResult | null>(null)
   const [walkInBusy, setWalkInBusy] = useState(false)
   const [walkInKey, setWalkInKey] = useState('')
+  const [showWalkInModal, setShowWalkInModal] = useState(false)
+  const [scanCompleted, setScanCompleted] = useState(false)
 
   const selectedEvent = events.find((event) => event.id === selectedEventId)
 
@@ -2193,6 +2182,7 @@ function ReceiverCheckInApp() {
     setScanToken(parsedToken)
     setMessage('Memvalidasi QR...')
     setValidating(true)
+    setScanCompleted(false)
 
     try {
       const json = await requestApi<ValidationResult>(`/receiver/events/${selectedEventId}/check-in/validate`, {
@@ -2219,6 +2209,7 @@ function ReceiverCheckInApp() {
       })
       setMessage(json.message)
       setValidation(null)
+      setScanCompleted(true)
       await loadHistory()
       await loadReceiverEvents()
     } catch (error) {
@@ -2265,7 +2256,7 @@ function ReceiverCheckInApp() {
 
   function resetWalkIn() {
     setWalkInForm({ name: '', phone: '', guest_count: 1, category: '', group_name: '', notes: '' })
-    setWalkInMatches([]); setWalkInResult(null); setWalkInKey('')
+    setWalkInMatches([]); setWalkInResult(null); setWalkInKey(''); setShowWalkInModal(false)
   }
 
   async function copyWalkInUrl() {
@@ -2312,6 +2303,12 @@ function ReceiverCheckInApp() {
     }
   }
 
+  async function stopScanner() {
+    setScannerActive(false)
+    setScannerError('')
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+  }
+
   function logoutReceiver() {
     window.localStorage.removeItem('guestory_receiver_token')
     setToken('')
@@ -2325,6 +2322,7 @@ function ReceiverCheckInApp() {
     return (
       <main className="receiverApp">
         <section className="receiverLogin">
+          <AuthBackLink />
           <div>
             <p className="eyebrow">Guestory Receiver</p>
             <h1>Check-in event</h1>
@@ -2336,7 +2334,7 @@ function ReceiverCheckInApp() {
           </label>
           <label>
             Password
-            <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} />
+            <PasswordField value={password} onChange={setPassword} autoComplete="current-password" />
           </label>
           <button className="primary wideButton" type="button" onClick={loginReceiver}>
             <LogIn size={18} />
@@ -2363,28 +2361,7 @@ function ReceiverCheckInApp() {
         </div>
       </header>
 
-      <section className="receiverStatus">
-        <label>
-          Event
-          <select
-            value={selectedEventId ?? ''}
-            onChange={(event) => {
-              setSelectedEventId(Number(event.target.value))
-              setValidation(null)
-            }}
-          >
-            {events.map((event) => (
-              <option key={event.id} value={event.id}>
-                {event.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <div>
-          <strong>{selectedEvent?.checked_in_count ?? 0}</strong>
-          <span>checked-in dari {selectedEvent?.guest_count ?? 0} tamu</span>
-        </div>
-      </section>
+      <section className="receiverToolbar"><label>Event<select value={selectedEventId ?? ''} onChange={(event) => { setSelectedEventId(Number(event.target.value)); setValidation(null); setScanCompleted(false) }}>{events.map((event) => <option key={event.id} value={event.id}>{event.name}</option>)}</select></label><button className="primary" type="button" onClick={() => setShowWalkInModal(true)}><UserPlus size={18} /> Walk In</button></section><section className="receiverMetrics metricsGrid"><article className="metric"><span>Total Tamu</span><strong>{selectedEvent?.guest_count ?? 0}</strong></article><article className="metric green"><span>Checked In</span><strong>{selectedEvent?.checked_in_count ?? 0}</strong></article><article className="metric blue"><span>Belum Hadir</span><strong>{Math.max((selectedEvent?.guest_count ?? 0) - (selectedEvent?.checked_in_count ?? 0), 0)}</strong></article><article className="metric rose"><span>Progress</span><strong>{selectedEvent?.guest_count ? Math.round(selectedEvent.checked_in_count / selectedEvent.guest_count * 100) : 0}%</strong></article></section>
 
       <section className="receiverScanner">
         <div className="sectionHeader">
@@ -2392,7 +2369,7 @@ function ReceiverCheckInApp() {
             <p className="eyebrow">Scanner</p>
             <h2>Scan QR tamu</h2>
           </div>
-          <button type="button" onClick={() => setScannerActive((active) => !active)}>
+          <button type="button" onClick={() => scannerActive ? void stopScanner() : setScannerActive(true)}>
             {scannerActive ? <CameraOff size={18} /> : <Camera size={18} />}
             {scannerActive ? 'Stop' : 'Camera'}
           </button>
@@ -2403,9 +2380,9 @@ function ReceiverCheckInApp() {
 
         <div className="manualToken">
           <input value={scanToken} onChange={(event) => setScanToken(event.target.value)} placeholder="Paste token atau URL QR" />
-          <button className="primary" type="button" disabled={validating || !scanToken.trim() || !selectedEventId} onClick={() => validateToken()}>
+          <button className="primary" type="button" disabled={validating || scannerActive || scanCompleted || !scanToken.trim() || !selectedEventId} onClick={() => validateToken()}>
             <QrCode size={18} />
-            {validating ? 'Validating…' : 'Validate'}
+            {validating ? 'Validating…' : scanCompleted ? 'Validated' : 'Validate'}
           </button>
         </div>
 
@@ -2423,7 +2400,7 @@ function ReceiverCheckInApp() {
                   value={actualGuestCount}
                   onChange={(event) => setActualGuestCount(Number(event.target.value))}
                 />
-              </label>
+              </label><span className="receiverCategory"><small>Category</small><strong>{validation.guest?.category ?? 'Guest'}</strong></span>
               <button className="primary" type="button" onClick={confirmQrCheckIn}>
                 <CheckCircle2 size={18} />
                 Check-in
@@ -2433,7 +2410,7 @@ function ReceiverCheckInApp() {
         </div>
       </section>
 
-      <section className="receiverSearch walkInSection">
+      {showWalkInModal && <Modal title="Daftarkan tamu walk-in" description="Cari tamu yang mungkin sudah terdaftar sebelum membuat invitation baru." onClose={() => !walkInBusy && setShowWalkInModal(false)}><div className="walkInSection">
         <div className="sectionHeader"><div><p className="eyebrow">Walk-in</p><h2>Daftarkan tamu di lokasi</h2></div><UserPlus size={18} /></div>
         {!walkInResult ? <>
           <p className="walkInNotice">Cari kemungkinan tamu yang sudah terdaftar terlebih dahulu. Jika cocok, gunakan invitation yang ada dan check-in tanpa membuat duplikat.</p>
@@ -2449,7 +2426,7 @@ function ReceiverCheckInApp() {
           {walkInMatches.length > 0 && <div className="likelyMatches"><strong>Kemungkinan sudah terdaftar</strong>{walkInMatches.map((guest) => <button key={guest.id} type="button" disabled={guest.attendance_status === 'CHECKED_IN'} onClick={() => manualCheckIn(guest)}><span><b>{guest.name}</b><small>{guest.guest_code} · {guest.guest_count} tamu · {guest.category ?? 'Other'}</small></span><em>{guest.attendance_status === 'CHECKED_IN' ? 'Sudah check-in' : 'Gunakan tamu ini'}</em></button>)}</div>}
           <button className="primary wideButton" type="button" disabled={walkInBusy || !walkInForm.name.trim()} onClick={createWalkIn}>{walkInBusy ? 'Menyimpan…' : 'Buat walk-in & check-in'}</button>
         </> : <div className="walkInSuccess"><CheckCircle2 size={32} /><h3>{walkInResult.guest.name}</h3><strong>CHECKED IN · {walkInResult.check_in.actual_guest_count} hadir</strong><img src={walkInResult.qr.svg_url} alt={`QR invitation ${walkInResult.guest.name}`} /><code>{walkInResult.invitation.url}</code><div className="inlineActions"><a className="buttonLike" href={walkInResult.invitation.url} target="_blank" rel="noreferrer">Open</a><button type="button" onClick={copyWalkInUrl}>Copy</button><button type="button" onClick={shareWalkIn}>Share</button><button type="button" onClick={resetWalkIn}>Walk-in berikutnya</button></div><small>Invitation personal aktif; WhatsApp tidak dikirim otomatis.</small></div>}
-      </section>
+      </div></Modal>}
 
       <section className="receiverSearch">
         <div className="sectionHeader">
@@ -2484,13 +2461,7 @@ function ReceiverCheckInApp() {
           </div>
           <Clock3 size={18} />
         </div>
-        {history.map((item) => (
-          <div key={item.id}>
-            <span>{item.checked_in_time ?? '-'}</span>
-            <strong>{item.guest.name}</strong>
-            <em>{item.method}</em>
-          </div>
-        ))}
+        <div className="receiverHistoryTable" role="table"><div className="receiverHistoryRow head" role="row"><span>Waktu</span><span>Tamu</span><span>Kategori</span><span>Metode</span></div>{history.map((item) => <div className="receiverHistoryRow" role="row" key={item.id}><span>{item.checked_in_time ?? '-'}</span><strong>{item.guest.name}</strong><span>{item.guest.category ?? 'Other'}</span><em>{item.method}</em></div>)}</div><Pagination page={1} pages={1} onPage={() => undefined} />
       </section>
     </main>
   )

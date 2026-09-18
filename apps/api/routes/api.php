@@ -1268,6 +1268,15 @@ Route::middleware(['guestory.auth', 'guestory.role:EVENT_OWNER,SUPERADMIN'])->ge
     $confirmedGuests = $event->guests()->where('rsvp_status', 'ATTENDING')->sum('guest_count');
     $checkedIn = $event->checkIns()->sum('actual_guest_count');
     $notCheckedIn = max($event->guests()->sum('guest_count') - $checkedIn, 0);
+    $checkInActivity = $event->checkIns()->orderBy('checked_in_at')->get()
+        ->groupBy(fn (CheckIn $checkIn) => $checkIn->checked_in_at?->format('H:').($checkIn->checked_in_at?->minute < 30 ? '00' : '30'))
+        ->map(fn ($records, $label) => ['label' => $label, 'total' => (int) $records->sum('actual_guest_count')])
+        ->values();
+    $categoryCounts = $event->guests()->get(['category', 'guest_count'])
+        ->groupBy(fn (Guest $guest) => $guest->category ?: 'Other')
+        ->map(fn ($records, $category) => ['category' => $category, 'total' => (int) $records->sum('guest_count')])
+        ->sortByDesc('total')
+        ->values();
 
     return [
         'event' => [
@@ -1296,6 +1305,8 @@ Route::middleware(['guestory.auth', 'guestory.role:EVENT_OWNER,SUPERADMIN'])->ge
             'attendance_rate' => $confirmedGuests > 0 ? round(($checkedIn / $confirmedGuests) * 100, 1) : 0,
             'total_photos' => $event->photos()->count(),
         ],
+        'check_in_activity' => $checkInActivity,
+        'category_counts' => $categoryCounts,
         'recent_check_ins' => $event->checkIns()
             ->with(['guest:id,name', 'receiver:id,name'])
             ->latest('checked_in_at')

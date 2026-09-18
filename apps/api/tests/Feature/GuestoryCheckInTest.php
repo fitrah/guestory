@@ -102,7 +102,11 @@ class GuestoryCheckInTest extends TestCase
 
         $this->getJson("/api/admin/events/{$event->id}/dashboard", $this->adminAuthHeaders())
             ->assertOk()
-            ->assertJsonPath('event.name', 'Andi & Sinta Wedding');
+            ->assertJsonPath('event.name', 'Andi & Sinta Wedding')
+            ->assertJsonStructure([
+                'check_in_activity' => [['label', 'total']],
+                'category_counts' => [['category', 'total']],
+            ]);
     }
 
     public function test_receiver_routes_require_receiver_access(): void
